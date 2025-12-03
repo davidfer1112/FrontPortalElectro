@@ -3,13 +3,17 @@
 import type React from "react"
 import { useState } from "react"
 import Image from "next/image"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import { AlertCircle } from "lucide-react"
-import { authService } from "@/services/authService"
 
-// === Toast local (igual estilo que el de QuotesSection) ===
+import { authService } from "@/services/authService"
+import { useAuth } from "@/context/AuthContext"
+import type { LoginRequest, LoginResponse } from "@/models/auth.model"
+
+// === Toast local ===
 
 type ToastType = "success" | "error" | "info"
 
@@ -37,11 +41,10 @@ function Toast({ message, type = "success" }: ToastProps) {
   )
 }
 
-interface LoginPageProps {
-  onLogin: () => void
-}
+export default function LoginPage() {
+  const router = useRouter()
+  const { setSession } = useAuth()
 
-export function LoginPage({ onLogin }: LoginPageProps) {
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [loading, setLoading] = useState(false)
@@ -64,32 +67,34 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     try {
       setLoading(true)
 
-      // 👇 NO tocamos authService, solo lo usamos
-      const res: any = await authService.login({
+      // Tipamos por si quieres más adelante usar LoginRequest/LoginResponse
+      const res: LoginResponse = await authService.login({
         username,
         password,
-      })
+      } as unknown as LoginRequest)
 
-      // 👇 Por si tu servicio NO lanza error pero devuelve algo tipo { success: false, message: '...' }
-      if (!res || res.success === false || res.error === true) {
-        const msg =
-          res?.message ||
-          res?.error ||
-          "Usuario o contraseña incorrectos."
-        showToast(msg, "error")
+      // authService.login YA guarda token y user en localStorage.
+      // Aquí actualizamos el contexto global para que la app sepa que hay sesión.
+      const token = res.token ?? null
+      const user = res.user ?? null
+
+      setSession(token, user)
+
+      if (!token || !user) {
+        showToast("No se pudo iniciar sesión correctamente.", "error")
         return
       }
 
       showToast(
-        `Bienvenido ${res.user?.username || res.user?.email || username}`,
+        `Bienvenido ${user.username || (user as any).email || username}`,
         "success",
       )
 
-      onLogin()
+      // Redirige a tu ruta principal protegida
+      router.push("/dashboard") // cámbialo por la ruta que uses realmente
     } catch (err: any) {
       console.error("Error en login:", err)
 
-      // Aquí entrará si tu servicio lanza error por 401, 500, etc.
       const msg =
         err?.response?.data?.message ||
         err?.message ||

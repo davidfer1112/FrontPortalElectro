@@ -1,19 +1,28 @@
+// src/app/page.tsx
 "use client"
 
-import { useState } from "react"
-import { LoginPage } from "@/components/login-page"
-import { AdminPortal } from "@/components/admin-portal"
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { useAuth } from "@/context/AuthContext"
 
 export default function Page() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const { isAuthenticated, isLoading } = useAuth()
+  const router = useRouter()
 
-  const handleLogin = () => {
-    setIsLoggedIn(true)
-  }
+  useEffect(() => {
+    if (isLoading) return
 
-  if (!isLoggedIn) {
-    return <LoginPage onLogin={handleLogin} />
-  }
+    if (isAuthenticated) {
+      router.replace("/dashboard")
+    } else {
+      router.replace("/login")
+    }
+  }, [isLoading, isAuthenticated, router])
 
-  return <AdminPortal />
+  // Algo simple mientras redirige
+  return (
+    <div className="h-screen flex items-center justify-center">
+      <p className="text-gray-500">Redirigiendo...</p>
+    </div>
+  )
 }
