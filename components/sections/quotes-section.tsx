@@ -26,8 +26,20 @@ import {
 
 import { foldersService } from "@/services/foldersService"
 import { quotesService } from "@/services/quotesService"
+import { installationPointsService } from "@/services/installationPointsService"
+import { quoteCatalogItemsService } from "@/services/quoteCatalogItemsService"
+import { cablesAndAccessoriesService } from "@/services/cablesAndAccessoriesService"
+import { catalogService } from "@/services/catalogService"
+// Ajusta el nombre/ruta si tu servicio se llama distinto:
+import { quoteCablesService } from "@/services/quoteCablesService"
+
 import type { Folder as FolderModel } from "@/models/folder.model"
 import type { Quote as QuoteModel } from "@/models/quote.model"
+import type { InstallationPoint } from "@/models/installation-point.model"
+import type { QuoteCable } from "@/models/quote-cable.model"
+import type { QuoteCatalogItem } from "@/models/quote-catalog-item.model"
+import type { CableOrAccessory } from "@/models/cables"
+import type { CatalogProduct } from "@/models/catalog.model"
 
 type ToastType = "success" | "error" | "info"
 
@@ -54,36 +66,6 @@ function Toast({ message, type = "success" }: ToastProps) {
   )
 }
 
-// ==== MOCK TEMPORAL DE ITEMS DE COTIZACIÓN ====
-const quoteDetailsMock: Record<
-  number,
-  {
-    cables_accessories: { id: number; name: string; quantity: number; unit_price: number }[]
-    catalog_items: { id: number; name: string; quantity: number; unit_price: number }[]
-    installation_points: { id: number; type: string; quantity: number; unit_price: number }[]
-  }
-> = {
-  1: {
-    cables_accessories: [
-      { id: 1, name: "Cable Ethernet Cat6 - 10m", quantity: 2, unit_price: 25.5 },
-      { id: 2, name: "Conector RJ45", quantity: 10, unit_price: 2.0 },
-    ],
-    catalog_items: [{ id: 3, name: "Cámara IP 1080p", quantity: 2, unit_price: 159.99 }],
-    installation_points: [
-      { id: 4, type: "Punto de Vigilancia Interior", quantity: 2, unit_price: 50.0 },
-      { id: 5, type: "Punto de Vigilancia Exterior", quantity: 1, unit_price: 75.0 },
-    ],
-  },
-  2: {
-    cables_accessories: [{ id: 6, name: "Cable Coaxial - 50m", quantity: 1, unit_price: 45.0 }],
-    catalog_items: [
-      { id: 7, name: "NVR Grabador 8 canales", quantity: 1, unit_price: 799.99 },
-      { id: 8, name: "Disco Duro 2TB", quantity: 2, unit_price: 85.0 },
-    ],
-    installation_points: [{ id: 9, type: "Punto de Vigilancia Interior", quantity: 8, unit_price: 50.0 }],
-  },
-}
-
 type DeleteConfirm =
   | {
       id: number
@@ -96,12 +78,20 @@ export function QuotesSection() {
   const [currentFolderId, setCurrentFolderId] = useState<number | null>(null)
   const [openedQuoteId, setOpenedQuoteId] = useState<number | null>(null)
 
-  // TODAS las carpetas que viene del backend
+  // Carpetas
   const [allFolders, setAllFolders] = useState<FolderModel[]>([])
-  // Carpetas visibles en el nivel actual
   const [folders, setFolders] = useState<FolderModel[]>([])
   const [quotes, setQuotes] = useState<QuoteModel[]>([])
   const [breadcrumb, setBreadcrumb] = useState<FolderModel[]>([])
+
+  // Detalle de cotización (líneas reales)
+  const [installationPoints, setInstallationPoints] = useState<InstallationPoint[]>([])
+  const [quoteCables, setQuoteCables] = useState<QuoteCable[]>([])
+  const [quoteCatalogItems, setQuoteCatalogItems] = useState<QuoteCatalogItem[]>([])
+
+  // Catálogos auxiliares
+  const [availableCables, setAvailableCables] = useState<CableOrAccessory[]>([])
+  const [availableCatalogProducts, setAvailableCatalogProducts] = useState<CatalogProduct[]>([])
 
   const [searchQuery, setSearchQuery] = useState("")
   const [newFolderName, setNewFolderName] = useState("")
@@ -109,11 +99,14 @@ export function QuotesSection() {
   const [showNewFolderDialog, setShowNewFolderDialog] = useState(false)
   const [showNewQuoteDialog, setShowNewQuoteDialog] = useState(false)
 
+  // Dialog agregar ítem
   const [showAddItemDialog, setShowAddItemDialog] = useState(false)
   const [itemType, setItemType] = useState<"cable" | "catalog" | "installation">("cable")
-  const [newItemName, setNewItemName] = useState("")
+  const [newItemName, setNewItemName] = useState("") // usado para instalación (type)
   const [newItemQuantity, setNewItemQuantity] = useState("")
   const [newItemPrice, setNewItemPrice] = useState("")
+  const [selectedCableId, setSelectedCableId] = useState<string>("")
+  const [selectedCatalogId, setSelectedCatalogId] = useState<string>("")
 
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
@@ -127,18 +120,21 @@ export function QuotesSection() {
     setTimeout(() => setToast(null), 3000)
   }
 
-  // ====== CARGA DE CARPETAS Y COTIZACIONES DEL NIVEL ACTUAL ======
+  // ==========================================================
+  // CARGA DE CARPETAS + COTIZACIONES DEL NIVEL
+  // ==========================================================
+
   const loadLevel = useCallback(
     async (folderId: number | null) => {
       try {
         setLoading(true)
         setError(null)
 
-        // 1) Traemos TODAS las carpetas del backend (una sola vez por nivel)
+        // 1) Obtener todas las carpetas
         const foldersRes = await foldersService.getAll()
         setAllFolders(foldersRes)
 
-        // 2) Filtramos solo las carpetas hijas del nivel actual
+        // 2) Filtrar solo las hijas del nivel actual
         const levelFolders = foldersRes.filter((f) =>
           folderId === null ? f.parent_id === null : f.parent_id === folderId,
         )
@@ -149,10 +145,10 @@ export function QuotesSection() {
           const quotesRes = await quotesService.getAll(folderId)
           setQuotes(quotesRes)
         } else {
-          setQuotes([]) // en raíz no mostramos cotizaciones
+          setQuotes([])
         }
 
-        // 4) Construimos breadcrumb usando TODAS las carpetas
+        // 4) Breadcrumb
         const path: FolderModel[] = []
         let current = folderId
         while (current !== null) {
@@ -176,7 +172,60 @@ export function QuotesSection() {
     loadLevel(currentFolderId)
   }, [currentFolderId, loadLevel])
 
-  // ====== CREAR CARPETA ======
+  // ==========================================================
+  // CARGA DE CATÁLOGOS (cables y productos) UNA VEZ
+  // ==========================================================
+  useEffect(() => {
+    const loadCatalogs = async () => {
+      try {
+        const [cables, catalogProducts] = await Promise.all([
+          cablesAndAccessoriesService.getAll(),
+          catalogService.getAll(),
+        ])
+        setAvailableCables(cables)
+        setAvailableCatalogProducts(catalogProducts)
+      } catch (err) {
+        console.error("Error cargando catálogos auxiliares:", err)
+      }
+    }
+
+    loadCatalogs()
+  }, [])
+
+  // ==========================================================
+  // CARGAR DETALLE DE UNA COTIZACIÓN
+  // ==========================================================
+  const loadQuoteDetails = useCallback(async (quoteId: number) => {
+    try {
+      const [points, cables, catalogItems] = await Promise.all([
+        installationPointsService.getAll(quoteId),
+        quoteCablesService.getAll(quoteId),
+        quoteCatalogItemsService.getAll(quoteId),
+      ])
+
+      setInstallationPoints(points)
+      setQuoteCables(cables)
+      setQuoteCatalogItems(catalogItems)
+    } catch (err) {
+      console.error("Error cargando detalle de la cotización:", err)
+      showToast("No se pudo cargar el detalle de la cotización", "error")
+    }
+  }, [])
+
+  useEffect(() => {
+    if (openedQuoteId) {
+      loadQuoteDetails(openedQuoteId)
+    } else {
+      // si cerramos la cotización, limpiamos detalles
+      setInstallationPoints([])
+      setQuoteCables([])
+      setQuoteCatalogItems([])
+    }
+  }, [openedQuoteId, loadQuoteDetails])
+
+  // ==========================================================
+  // CREAR CARPETA
+  // ==========================================================
   const handleCreateFolder = async () => {
     if (!newFolderName.trim()) return
 
@@ -186,7 +235,6 @@ export function QuotesSection() {
         parent_id: currentFolderId ?? null,
       })
 
-      // actualizamos lista de todas las carpetas y las visibles en este nivel
       const updatedAll = [...allFolders, created]
       setAllFolders(updatedAll)
 
@@ -204,7 +252,9 @@ export function QuotesSection() {
     }
   }
 
-  // ====== CREAR COTIZACIÓN ======
+  // ==========================================================
+  // CREAR COTIZACIÓN
+  // ==========================================================
   const handleCreateQuote = async () => {
     if (!newQuoteName.trim()) return
 
@@ -228,7 +278,9 @@ export function QuotesSection() {
     }
   }
 
-  // ====== FILTROS ======
+  // ==========================================================
+  // FILTROS BUSCADOR
+  // ==========================================================
   const filteredFolders = folders.filter(
     (f) => searchQuery === "" || f.name.toLowerCase().includes(searchQuery.toLowerCase()),
   )
@@ -237,53 +289,134 @@ export function QuotesSection() {
     (q) => searchQuery === "" || q.name.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  // ====== DETALLE DE COTIZACIÓN / ITEMS (MOCK) ======
+  // ==========================================================
+  // HELPERS DETALLE COTIZACIÓN
+  // ==========================================================
   const selectedQuote = quotes.find((q) => q.id === openedQuoteId) || null
 
-  const quoteItemsData = openedQuoteId
-    ? quoteDetailsMock[openedQuoteId] ?? {
-        cables_accessories: [],
-        catalog_items: [],
-        installation_points: [],
-      }
-    : {
-        cables_accessories: [],
-        catalog_items: [],
-        installation_points: [],
-      }
+  const calculateSectionTotal = (numbers: number[]) =>
+    numbers.reduce((sum, value) => sum + value, 0)
 
-  const handleAddItem = () => {
-    if (!newItemName.trim() || !newItemQuantity || !newItemPrice) return
+  const cableTotal = calculateSectionTotal(
+    quoteCables.map((item) => item.quantity * Number(item.unit_price)),
+  )
 
-    console.log("[mock] Nuevo item:", {
-      quote_id: openedQuoteId,
-      type: itemType,
-      name: newItemName,
-      quantity: Number.parseInt(newItemQuantity),
-      unit_price: Number.parseFloat(newItemPrice),
-    })
+  const catalogTotal = calculateSectionTotal(
+    quoteCatalogItems.map((item) => item.quantity * Number(item.catalog_price)),
+  )
 
-    showToast("Item agregado exitosamente (mock)", "success")
-    setNewItemName("")
-    setNewItemQuantity("")
-    setNewItemPrice("")
-    setShowAddItemDialog(false)
-  }
+  const installationTotal = calculateSectionTotal(
+    installationPoints.map((item) => item.quantity * Number(item.unit_price)),
+  )
 
-  const calculateSectionTotal = (items: { quantity: number; unit_price: number }[]) =>
-    items.reduce((sum, item) => sum + item.quantity * item.unit_price, 0)
-
-  const cableTotal = calculateSectionTotal(quoteItemsData.cables_accessories)
-  const catalogTotal = calculateSectionTotal(quoteItemsData.catalog_items)
-  const installationTotal = calculateSectionTotal(quoteItemsData.installation_points)
   const grandTotal = cableTotal + catalogTotal + installationTotal
+
+  const getCableName = (line: QuoteCable) => {
+    const cable = availableCables.find((c) => c.id === line.cable_accessory_id)
+    return cable ? cable.name : `Cable #${line.cable_accessory_id}`
+  }
 
   const handleExportToExcel = () => {
     console.log("[mock] Exportando a Excel...")
     showToast("Funcionalidad de exportar a Excel en desarrollo", "info")
   }
 
-  // ====== ELIMINAR COTIZACIÓN (y otros tipos MOCK) ======
+  // ==========================================================
+  // AGREGAR ÍTEM (instalación, cable, catálogo)
+  // ==========================================================
+  const resetItemDialogState = () => {
+    setNewItemName("")
+    setNewItemQuantity("")
+    setNewItemPrice("")
+    setSelectedCableId("")
+    setSelectedCatalogId("")
+  }
+
+  const handleAddItem = async () => {
+    if (!openedQuoteId) return
+
+    try {
+      if (!newItemQuantity) {
+        showToast("Debes ingresar una cantidad", "error")
+        return
+      }
+
+      const quantity = Number(newItemQuantity)
+      if (Number.isNaN(quantity) || quantity <= 0) {
+        showToast("Cantidad inválida", "error")
+        return
+      }
+
+      if (itemType === "installation") {
+        if (!newItemName.trim() || !newItemPrice) {
+          showToast("Completa tipo y precio", "error")
+          return
+        }
+
+        const created = await installationPointsService.create({
+          quote_id: openedQuoteId,
+          type: newItemName.trim(),
+          quantity,
+          unit_price: newItemPrice,
+        })
+
+        setInstallationPoints((prev) => [...prev, created])
+        showToast("Punto de instalación agregado", "success")
+      } else if (itemType === "cable") {
+        if (!selectedCableId) {
+          showToast("Selecciona un cable/accesorio", "error")
+          return
+        }
+
+        const cable = availableCables.find((c) => c.id === Number(selectedCableId))
+        const unitPrice = newItemPrice || cable?.price || "0"
+
+        const created = await quoteCablesService.create({
+          quote_id: openedQuoteId,
+          cable_accessory_id: Number(selectedCableId),
+          quantity,
+          unit_price: unitPrice,
+        })
+
+        setQuoteCables((prev) => [...prev, created])
+        showToast("Cable/Accesorio agregado a la cotización", "success")
+      } else if (itemType === "catalog") {
+        if (!selectedCatalogId) {
+          showToast("Selecciona un producto del catálogo", "error")
+          return
+        }
+
+        const created = await quoteCatalogItemsService.create({
+          quote_id: openedQuoteId,
+          catalog_id: Number(selectedCatalogId),
+          quantity,
+        })
+
+        setQuoteCatalogItems((prev) => [...prev, created])
+        showToast("Item de catálogo agregado a la cotización", "success")
+      }
+
+      resetItemDialogState()
+      setShowAddItemDialog(false)
+    } catch (err) {
+      console.error("Error agregando ítem:", err)
+      showToast("No se pudo agregar el ítem", "error")
+    }
+  }
+
+  // precio por defecto al seleccionar cable
+  useEffect(() => {
+    if (itemType === "cable" && selectedCableId) {
+      const cable = availableCables.find((c) => c.id === Number(selectedCableId))
+      if (cable) {
+        setNewItemPrice(cable.price)
+      }
+    }
+  }, [itemType, selectedCableId, availableCables])
+
+  // ==========================================================
+  // ELIMINAR (cotización o línea)
+  // ==========================================================
   const handleConfirmDelete = async () => {
     if (!deleteConfirm) return
 
@@ -291,8 +424,16 @@ export function QuotesSection() {
       if (deleteConfirm.type === "quote") {
         await quotesService.remove(deleteConfirm.id)
         setQuotes((prev) => prev.filter((q) => q.id !== deleteConfirm.id))
-      } else {
-        console.log("[mock] Eliminar item:", deleteConfirm)
+        if (openedQuoteId === deleteConfirm.id) setOpenedQuoteId(null)
+      } else if (deleteConfirm.type === "cable") {
+        await quoteCablesService.remove(deleteConfirm.id)
+        setQuoteCables((prev) => prev.filter((c) => c.id !== deleteConfirm.id))
+      } else if (deleteConfirm.type === "catalog") {
+        await quoteCatalogItemsService.remove(deleteConfirm.id)
+        setQuoteCatalogItems((prev) => prev.filter((c) => c.id !== deleteConfirm.id))
+      } else if (deleteConfirm.type === "installation") {
+        await installationPointsService.remove(deleteConfirm.id)
+        setInstallationPoints((prev) => prev.filter((p) => p.id !== deleteConfirm.id))
       }
 
       const label =
@@ -313,7 +454,9 @@ export function QuotesSection() {
     }
   }
 
-  // ====== RENDER: VISTA DETALLE COTIZACIÓN ======
+  // ==========================================================
+  // VISTA DETALLE COTIZACIÓN
+  // ==========================================================
   if (openedQuoteId && selectedQuote) {
     return (
       <div className="p-8">
@@ -345,13 +488,14 @@ export function QuotesSection() {
           </p>
         </div>
 
-        {/* Cables y accesorios */}
+        {/* Cables y Accesorios */}
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Cables y Accesorios</h3>
             <Button
               onClick={() => {
                 setItemType("cable")
+                resetItemDialogState()
                 setShowAddItemDialog(true)
               }}
               className="bg-red-600 hover:bg-red-700"
@@ -361,38 +505,50 @@ export function QuotesSection() {
             </Button>
           </div>
 
-          {quoteItemsData.cables_accessories.length > 0 ? (
+          {quoteCables.length > 0 ? (
             <div className="overflow-x-auto border border-gray-200 rounded-lg">
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="text-left py-3 px-4 font-semibold text-gray-900">Producto</th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-900">Cantidad</th>
-                    <th className="text-right py-3 px-4 font-semibold text-gray-900">Precio Unit.</th>
-                    <th className="text-right py-3 px-4 font-semibold text-gray-900">Subtotal</th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-900">Acción</th>
+                    <th className="text-left py-3 px-4 font-semibold text-gray-900">
+                      Producto
+                    </th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-900">
+                      Cantidad
+                    </th>
+                    <th className="text-right py-3 px-4 font-semibold text-gray-900">
+                      Precio Unit.
+                    </th>
+                    <th className="text-right py-3 px-4 font-semibold text-gray-900">
+                      Subtotal
+                    </th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-900">
+                      Acción
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {quoteItemsData.cables_accessories.map((item) => (
+                  {quoteCables.map((item) => (
                     <tr
                       key={item.id}
                       className="border-b border-gray-200 hover:bg-gray-50 transition"
                     >
-                      <td className="py-3 px-4 text-gray-900">{item.name}</td>
-                      <td className="py-3 px-4 text-center text-gray-700">{item.quantity}</td>
+                      <td className="py-3 px-4 text-gray-900">{getCableName(item)}</td>
+                      <td className="py-3 px-4 text-center text-gray-700">
+                        {item.quantity}
+                      </td>
                       <td className="py-3 px-4 text-right text-gray-700">
-                        ${item.unit_price.toFixed(2)}
+                        ${Number(item.unit_price).toFixed(2)}
                       </td>
                       <td className="py-3 px-4 text-right font-medium text-gray-900">
-                        {(item.quantity * item.unit_price).toFixed(2)}
+                        {(item.quantity * Number(item.unit_price)).toFixed(2)}
                       </td>
                       <td className="py-3 px-4 text-center">
                         <button
                           onClick={() =>
                             setDeleteConfirm({
                               id: item.id,
-                              name: item.name,
+                              name: getCableName(item),
                               type: "cable",
                             })
                           }
@@ -408,7 +564,9 @@ export function QuotesSection() {
               <div className="bg-gray-50 p-4 flex justify-end border-t border-gray-200">
                 <div className="text-sm font-medium text-gray-700">
                   Subtotal:{" "}
-                  <span className="text-gray-900 font-bold">${cableTotal.toFixed(2)}</span>
+                  <span className="text-gray-900 font-bold">
+                    ${cableTotal.toFixed(2)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -426,6 +584,7 @@ export function QuotesSection() {
             <Button
               onClick={() => {
                 setItemType("catalog")
+                resetItemDialogState()
                 setShowAddItemDialog(true)
               }}
               className="bg-red-600 hover:bg-red-700"
@@ -435,38 +594,54 @@ export function QuotesSection() {
             </Button>
           </div>
 
-          {quoteItemsData.catalog_items.length > 0 ? (
+          {quoteCatalogItems.length > 0 ? (
             <div className="overflow-x-auto border border-gray-200 rounded-lg">
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="text-left py-3 px-4 font-semibold text-gray-900">Producto</th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-900">Cantidad</th>
-                    <th className="text-right py-3 px-4 font-semibold text-gray-900">Precio Unit.</th>
-                    <th className="text-right py-3 px-4 font-semibold text-gray-900">Subtotal</th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-900">Acción</th>
+                    <th className="text-left py-3 px-4 font-semibold text-gray-900">
+                      Referencia
+                    </th>
+                    <th className="text-left py-3 px-4 font-semibold text-gray-900">
+                      Descripción
+                    </th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-900">
+                      Cantidad
+                    </th>
+                    <th className="text-right py-3 px-4 font-semibold text-gray-900">
+                      Precio Unit. cat.
+                    </th>
+                    <th className="text-right py-3 px-4 font-semibold text-gray-900">
+                      Subtotal
+                    </th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-900">
+                      Acción
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {quoteItemsData.catalog_items.map((item) => (
+                  {quoteCatalogItems.map((item) => (
                     <tr
                       key={item.id}
                       className="border-b border-gray-200 hover:bg-gray-50 transition"
                     >
-                      <td className="py-3 px-4 text-gray-900">{item.name}</td>
-                      <td className="py-3 px-4 text-center text-gray-700">{item.quantity}</td>
+                      <td className="py-3 px-4 text-gray-900">{item.reference}</td>
+                      <td className="py-3 px-4 text-gray-700">{item.description}</td>
+                      <td className="py-3 px-4 text-center text-gray-700">
+                        {item.quantity}
+                      </td>
                       <td className="py-3 px-4 text-right text-gray-700">
-                        ${item.unit_price.toFixed(2)}
+                        ${Number(item.catalog_price).toFixed(2)}
                       </td>
                       <td className="py-3 px-4 text-right font-medium text-gray-900">
-                        {(item.quantity * item.unit_price).toFixed(2)}
+                        {(item.quantity * Number(item.catalog_price)).toFixed(2)}
                       </td>
                       <td className="py-3 px-4 text-center">
                         <button
                           onClick={() =>
                             setDeleteConfirm({
                               id: item.id,
-                              name: item.name,
+                              name: item.reference,
                               type: "catalog",
                             })
                           }
@@ -482,7 +657,9 @@ export function QuotesSection() {
               <div className="bg-gray-50 p-4 flex justify-end border-t border-gray-200">
                 <div className="text-sm font-medium text-gray-700">
                   Subtotal:{" "}
-                  <span className="text-gray-900 font-bold">${catalogTotal.toFixed(2)}</span>
+                  <span className="text-gray-900 font-bold">
+                    ${catalogTotal.toFixed(2)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -500,16 +677,17 @@ export function QuotesSection() {
             <Button
               onClick={() => {
                 setItemType("installation")
+                resetItemDialogState()
                 setShowAddItemDialog(true)
               }}
               className="bg-red-600 hover:bg-red-700"
             >
               <Plus size={16} className="mr-2" />
-              Agregar Item
+              Agregar Punto
             </Button>
           </div>
 
-          {quoteItemsData.installation_points.length > 0 ? (
+          {installationPoints.length > 0 ? (
             <div className="overflow-x-auto border border-gray-200 rounded-lg">
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
@@ -530,7 +708,7 @@ export function QuotesSection() {
                   </tr>
                 </thead>
                 <tbody>
-                  {quoteItemsData.installation_points.map((item) => (
+                  {installationPoints.map((item) => (
                     <tr
                       key={item.id}
                       className="border-b border-gray-200 hover:bg-gray-50 transition"
@@ -540,10 +718,10 @@ export function QuotesSection() {
                         {item.quantity}
                       </td>
                       <td className="py-3 px-4 text-right text-gray-700">
-                        ${item.unit_price.toFixed(2)}
+                        ${Number(item.unit_price).toFixed(2)}
                       </td>
                       <td className="py-3 px-4 text-right font-medium text-gray-900">
-                        {(item.quantity * item.unit_price).toFixed(2)}
+                        {(item.quantity * Number(item.unit_price)).toFixed(2)}
                       </td>
                       <td className="py-3 px-4 text-center">
                         <button
@@ -574,7 +752,7 @@ export function QuotesSection() {
             </div>
           ) : (
             <p className="text-gray-500 text-center py-8 bg-gray-50 rounded-lg">
-              Sin items agregados
+              Sin puntos de instalación
             </p>
           )}
         </div>
@@ -603,7 +781,7 @@ export function QuotesSection() {
           </div>
         </div>
 
-        {/* Dialogs de detalle */}
+        {/* Dialog delete detalle */}
         <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
           <DialogContent>
             <DialogHeader>
@@ -630,6 +808,7 @@ export function QuotesSection() {
           </DialogContent>
         </Dialog>
 
+        {/* Dialog agregar ítem */}
         <Dialog open={showAddItemDialog} onOpenChange={setShowAddItemDialog}>
           <DialogContent>
             <DialogHeader>
@@ -642,18 +821,63 @@ export function QuotesSection() {
                   : "Punto de Instalación"}
               </DialogTitle>
             </DialogHeader>
+
             <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700 mb-1 block">
-                  Nombre/Descripción
-                </label>
-                <Input
-                  placeholder="Ej: Cable Ethernet 10m"
-                  value={newItemName}
-                  onChange={(e) => setNewItemName(e.target.value)}
-                  autoFocus
-                />
-              </div>
+              {itemType === "installation" && (
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">
+                    Tipo / Descripción
+                  </label>
+                  <Input
+                    placeholder="Ej: Punto de vigilancia exterior"
+                    value={newItemName}
+                    onChange={(e) => setNewItemName(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+              )}
+
+              {itemType === "cable" && (
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">
+                    Cable / Accesorio
+                  </label>
+                  <select
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                    value={selectedCableId}
+                    onChange={(e) => setSelectedCableId(e.target.value)}
+                  >
+                    <option value="">Selecciona un cable o accesorio</option>
+                    {availableCables.map((cable) => (
+                      <option key={cable.id} value={cable.id}>
+                        {cable.name} — ${Number(cable.price).toFixed(2)} / {cable.measurement_type}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {itemType === "catalog" && (
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">
+                    Producto de catálogo
+                  </label>
+                  <select
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                    value={selectedCatalogId}
+                    onChange={(e) => setSelectedCatalogId(e.target.value)}
+                  >
+                    <option value="">Selecciona un producto</option>
+                    {availableCatalogProducts.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.reference} — {p.description} — $
+                        {Number(p.price).toFixed(2)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="text-sm font-medium text-gray-700 mb-1 block">
                   Cantidad
@@ -665,21 +889,31 @@ export function QuotesSection() {
                   onChange={(e) => setNewItemQuantity(e.target.value)}
                 />
               </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700 mb-1 block">
-                  Precio Unitario
-                </label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  placeholder="Ej: 25.50"
-                  value={newItemPrice}
-                  onChange={(e) => setNewItemPrice(e.target.value)}
-                />
-              </div>
+
+              {(itemType === "installation" || itemType === "cable") && (
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">
+                    Precio Unitario
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    placeholder="Ej: 25000"
+                    value={newItemPrice}
+                    onChange={(e) => setNewItemPrice(e.target.value)}
+                  />
+                </div>
+              )}
             </div>
+
             <DialogFooter>
-              <Button variant="outline" onClick={() => setShowAddItemDialog(false)}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowAddItemDialog(false)
+                  resetItemDialogState()
+                }}
+              >
                 Cancelar
               </Button>
               <Button onClick={handleAddItem} className="bg-red-600 hover:bg-red-700">
@@ -694,7 +928,9 @@ export function QuotesSection() {
     )
   }
 
-  // ====== RENDER: VISTA CARPETAS + COTIZACIONES ======
+  // ==========================================================
+  // VISTA CARPETAS + COTIZACIONES
+  // ==========================================================
   return (
     <div className="p-8">
       {/* Header */}
@@ -917,7 +1153,7 @@ export function QuotesSection() {
             </div>
           )}
 
-          {/* Empty state */}
+          {/* Empty */}
           {!loading && filteredFolders.length === 0 && filteredQuotes.length === 0 && (
             <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
               <Folder size={48} className="mx-auto text-gray-300 mb-4" />
@@ -934,7 +1170,7 @@ export function QuotesSection() {
         </>
       )}
 
-      {/* Dialogs crear carpeta/cotización y delete (lista) */}
+      {/* Dialog Nueva Carpeta */}
       <Dialog open={showNewFolderDialog} onOpenChange={setShowNewFolderDialog}>
         <DialogContent>
           <DialogHeader>
@@ -957,6 +1193,7 @@ export function QuotesSection() {
         </DialogContent>
       </Dialog>
 
+      {/* Dialog Nueva Cotización */}
       <Dialog open={showNewQuoteDialog} onOpenChange={setShowNewQuoteDialog}>
         <DialogContent>
           <DialogHeader>
@@ -979,6 +1216,7 @@ export function QuotesSection() {
         </DialogContent>
       </Dialog>
 
+      {/* Dialog delete lista */}
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
         <DialogContent>
           <DialogHeader>
