@@ -55,7 +55,6 @@ function Toast({ message, type = "success" }: ToastProps) {
 }
 
 // ==== MOCK TEMPORAL DE ITEMS DE COTIZACIÓN ====
-// luego esto se reemplaza por servicios reales de items
 const quoteDetailsMock: Record<
   number,
   {
@@ -97,6 +96,9 @@ export function QuotesSection() {
   const [currentFolderId, setCurrentFolderId] = useState<number | null>(null)
   const [openedQuoteId, setOpenedQuoteId] = useState<number | null>(null)
 
+  // TODAS las carpetas que viene del backend
+  const [allFolders, setAllFolders] = useState<FolderModel[]>([])
+  // Carpetas visibles en el nivel actual
   const [folders, setFolders] = useState<FolderModel[]>([])
   const [quotes, setQuotes] = useState<QuoteModel[]>([])
   const [breadcrumb, setBreadcrumb] = useState<FolderModel[]>([])
@@ -126,36 +128,39 @@ export function QuotesSection() {
   }
 
   // ====== CARGA DE CARPETAS Y COTIZACIONES DEL NIVEL ACTUAL ======
-
   const loadLevel = useCallback(
     async (folderId: number | null) => {
       try {
         setLoading(true)
         setError(null)
 
-        // Carpetas hijas del folder actual (o raíz si folderId = null)
-        const foldersRes = await foldersService.getAll(folderId ?? null)
-        setFolders(foldersRes)
+        // 1) Traemos TODAS las carpetas del backend (una sola vez por nivel)
+        const foldersRes = await foldersService.getAll()
+        setAllFolders(foldersRes)
 
-        // Cotizaciones dentro de la carpeta actual
+        // 2) Filtramos solo las carpetas hijas del nivel actual
+        const levelFolders = foldersRes.filter((f) =>
+          folderId === null ? f.parent_id === null : f.parent_id === folderId,
+        )
+        setFolders(levelFolders)
+
+        // 3) Cotizaciones del nivel actual
         if (folderId !== null) {
           const quotesRes = await quotesService.getAll(folderId)
           setQuotes(quotesRes)
         } else {
-          // en raíz, por diseño anterior, no mostramos cotizaciones
-          setQuotes([])
+          setQuotes([]) // en raíz no mostramos cotizaciones
         }
 
-        // Construir breadcrumb (ruta de carpetas)
+        // 4) Construimos breadcrumb usando TODAS las carpetas
         const path: FolderModel[] = []
         let current = folderId
-
         while (current !== null) {
-          const f = await foldersService.getById(current)
+          const f = foldersRes.find((x) => x.id === current)
+          if (!f) break
           path.unshift(f)
           current = f.parent_id
         }
-
         setBreadcrumb(path)
       } catch (err) {
         console.error("Error cargando nivel de carpetas/cotizaciones:", err)
@@ -172,7 +177,6 @@ export function QuotesSection() {
   }, [currentFolderId, loadLevel])
 
   // ====== CREAR CARPETA ======
-
   const handleCreateFolder = async () => {
     if (!newFolderName.trim()) return
 
@@ -181,7 +185,16 @@ export function QuotesSection() {
         name: newFolderName.trim(),
         parent_id: currentFolderId ?? null,
       })
-      setFolders((prev) => [...prev, created])
+
+      // actualizamos lista de todas las carpetas y las visibles en este nivel
+      const updatedAll = [...allFolders, created]
+      setAllFolders(updatedAll)
+
+      const levelFolders = updatedAll.filter((f) =>
+        currentFolderId === null ? f.parent_id === null : f.parent_id === currentFolderId,
+      )
+      setFolders(levelFolders)
+
       showToast("Carpeta creada exitosamente", "success")
       setNewFolderName("")
       setShowNewFolderDialog(false)
@@ -192,7 +205,6 @@ export function QuotesSection() {
   }
 
   // ====== CREAR COTIZACIÓN ======
-
   const handleCreateQuote = async () => {
     if (!newQuoteName.trim()) return
 
@@ -217,21 +229,15 @@ export function QuotesSection() {
   }
 
   // ====== FILTROS ======
-
   const filteredFolders = folders.filter(
-    (f) =>
-      searchQuery === "" ||
-      f.name.toLowerCase().includes(searchQuery.toLowerCase()),
+    (f) => searchQuery === "" || f.name.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
   const filteredQuotes = quotes.filter(
-    (q) =>
-      searchQuery === "" ||
-      q.name.toLowerCase().includes(searchQuery.toLowerCase()),
+    (q) => searchQuery === "" || q.name.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
   // ====== DETALLE DE COTIZACIÓN / ITEMS (MOCK) ======
-
   const selectedQuote = quotes.find((q) => q.id === openedQuoteId) || null
 
   const quoteItemsData = openedQuoteId
@@ -247,9 +253,7 @@ export function QuotesSection() {
       }
 
   const handleAddItem = () => {
-    if (!newItemName.trim() || !newItemQuantity || !newItemPrice) {
-      return
-    }
+    if (!newItemName.trim() || !newItemQuantity || !newItemPrice) return
 
     console.log("[mock] Nuevo item:", {
       quote_id: openedQuoteId,
@@ -280,7 +284,6 @@ export function QuotesSection() {
   }
 
   // ====== ELIMINAR COTIZACIÓN (y otros tipos MOCK) ======
-
   const handleConfirmDelete = async () => {
     if (!deleteConfirm) return
 
@@ -289,7 +292,6 @@ export function QuotesSection() {
         await quotesService.remove(deleteConfirm.id)
         setQuotes((prev) => prev.filter((q) => q.id !== deleteConfirm.id))
       } else {
-        // Para 'cable', 'catalog', 'installation' seguimos en modo mock
         console.log("[mock] Eliminar item:", deleteConfirm)
       }
 
@@ -312,7 +314,6 @@ export function QuotesSection() {
   }
 
   // ====== RENDER: VISTA DETALLE COTIZACIÓN ======
-
   if (openedQuoteId && selectedQuote) {
     return (
       <div className="p-8">
@@ -326,9 +327,7 @@ export function QuotesSection() {
               <ArrowLeft size={20} />
               <span className="text-sm font-medium">Volver</span>
             </button>
-            <h1 className="text-3xl font-bold text-gray-900">
-              {selectedQuote.name}
-            </h1>
+            <h1 className="text-3xl font-bold text-gray-900">{selectedQuote.name}</h1>
           </div>
           <button
             onClick={handleExportToExcel}
@@ -342,17 +341,14 @@ export function QuotesSection() {
         {/* Info */}
         <div className="mb-6 text-sm text-gray-600 bg-gray-50 p-4 rounded-lg">
           <p>
-            Creado: {selectedQuote.created_at} | Actualizado:{" "}
-            {selectedQuote.updated_at}
+            Creado: {selectedQuote.created_at} | Actualizado: {selectedQuote.updated_at}
           </p>
         </div>
 
-        {/* Cables y Accesorios */}
+        {/* Cables y accesorios */}
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">
-              Cables y Accesorios
-            </h3>
+            <h3 className="text-lg font-semibold text-gray-900">Cables y Accesorios</h3>
             <Button
               onClick={() => {
                 setItemType("cable")
@@ -370,21 +366,11 @@ export function QuotesSection() {
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="text-left py-3 px-4 font-semibold text-gray-900">
-                      Producto
-                    </th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-900">
-                      Cantidad
-                    </th>
-                    <th className="text-right py-3 px-4 font-semibold text-gray-900">
-                      Precio Unit.
-                    </th>
-                    <th className="text-right py-3 px-4 font-semibold text-gray-900">
-                      Subtotal
-                    </th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-900">
-                      Acción
-                    </th>
+                    <th className="text-left py-3 px-4 font-semibold text-gray-900">Producto</th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-900">Cantidad</th>
+                    <th className="text-right py-3 px-4 font-semibold text-gray-900">Precio Unit.</th>
+                    <th className="text-right py-3 px-4 font-semibold text-gray-900">Subtotal</th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-900">Acción</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -393,12 +379,8 @@ export function QuotesSection() {
                       key={item.id}
                       className="border-b border-gray-200 hover:bg-gray-50 transition"
                     >
-                      <td className="py-3 px-4 text-gray-900">
-                        {item.name}
-                      </td>
-                      <td className="py-3 px-4 text-center text-gray-700">
-                        {item.quantity}
-                      </td>
+                      <td className="py-3 px-4 text-gray-900">{item.name}</td>
+                      <td className="py-3 px-4 text-center text-gray-700">{item.quantity}</td>
                       <td className="py-3 px-4 text-right text-gray-700">
                         ${item.unit_price.toFixed(2)}
                       </td>
@@ -426,9 +408,7 @@ export function QuotesSection() {
               <div className="bg-gray-50 p-4 flex justify-end border-t border-gray-200">
                 <div className="text-sm font-medium text-gray-700">
                   Subtotal:{" "}
-                  <span className="text-gray-900 font-bold">
-                    ${cableTotal.toFixed(2)}
-                  </span>
+                  <span className="text-gray-900 font-bold">${cableTotal.toFixed(2)}</span>
                 </div>
               </div>
             </div>
@@ -442,9 +422,7 @@ export function QuotesSection() {
         {/* Items de catálogo */}
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">
-              Items de Catálogo
-            </h3>
+            <h3 className="text-lg font-semibold text-gray-900">Items de Catálogo</h3>
             <Button
               onClick={() => {
                 setItemType("catalog")
@@ -462,21 +440,11 @@ export function QuotesSection() {
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="text-left py-3 px-4 font-semibold text-gray-900">
-                      Producto
-                    </th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-900">
-                      Cantidad
-                    </th>
-                    <th className="text-right py-3 px-4 font-semibold text-gray-900">
-                      Precio Unit.
-                    </th>
-                    <th className="text-right py-3 px-4 font-semibold text-gray-900">
-                      Subtotal
-                    </th>
-                    <th className="text-center py-3 px-4 font-semibold text-gray-900">
-                      Acción
-                    </th>
+                    <th className="text-left py-3 px-4 font-semibold text-gray-900">Producto</th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-900">Cantidad</th>
+                    <th className="text-right py-3 px-4 font-semibold text-gray-900">Precio Unit.</th>
+                    <th className="text-right py-3 px-4 font-semibold text-gray-900">Subtotal</th>
+                    <th className="text-center py-3 px-4 font-semibold text-gray-900">Acción</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -485,12 +453,8 @@ export function QuotesSection() {
                       key={item.id}
                       className="border-b border-gray-200 hover:bg-gray-50 transition"
                     >
-                      <td className="py-3 px-4 text-gray-900">
-                        {item.name}
-                      </td>
-                      <td className="py-3 px-4 text-center text-gray-700">
-                        {item.quantity}
-                      </td>
+                      <td className="py-3 px-4 text-gray-900">{item.name}</td>
+                      <td className="py-3 px-4 text-center text-gray-700">{item.quantity}</td>
                       <td className="py-3 px-4 text-right text-gray-700">
                         ${item.unit_price.toFixed(2)}
                       </td>
@@ -518,9 +482,7 @@ export function QuotesSection() {
               <div className="bg-gray-50 p-4 flex justify-end border-t border-gray-200">
                 <div className="text-sm font-medium text-gray-700">
                   Subtotal:{" "}
-                  <span className="text-gray-900 font-bold">
-                    ${catalogTotal.toFixed(2)}
-                  </span>
+                  <span className="text-gray-900 font-bold">${catalogTotal.toFixed(2)}</span>
                 </div>
               </div>
             </div>
@@ -534,9 +496,7 @@ export function QuotesSection() {
         {/* Puntos de instalación */}
         <div className="mb-8">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">
-              Puntos de Instalación
-            </h3>
+            <h3 className="text-lg font-semibold text-gray-900">Puntos de Instalación</h3>
             <Button
               onClick={() => {
                 setItemType("installation")
@@ -554,9 +514,7 @@ export function QuotesSection() {
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="text-left py-3 px-4 font-semibold text-gray-900">
-                      Tipo
-                    </th>
+                    <th className="text-left py-3 px-4 font-semibold text-gray-900">Tipo</th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-900">
                       Cantidad
                     </th>
@@ -577,9 +535,7 @@ export function QuotesSection() {
                       key={item.id}
                       className="border-b border-gray-200 hover:bg-gray-50 transition"
                     >
-                      <td className="py-3 px-4 text-gray-900">
-                        {item.type}
-                      </td>
+                      <td className="py-3 px-4 text-gray-900">{item.type}</td>
                       <td className="py-3 px-4 text-center text-gray-700">
                         {item.quantity}
                       </td>
@@ -641,15 +597,13 @@ export function QuotesSection() {
               </div>
               <div className="flex justify-between text-xl font-bold text-gray-900">
                 <span>Total General:</span>
-                <span className="text-red-600">
-                  ${grandTotal.toFixed(2)}
-                </span>
+                <span className="text-red-600">${grandTotal.toFixed(2)}</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Dialogs de delete y add item en modo detalle */}
+        {/* Dialogs de detalle */}
         <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
           <DialogContent>
             <DialogHeader>
@@ -663,18 +617,13 @@ export function QuotesSection() {
                 ¿Estás seguro que deseas eliminar{" "}
                 <span className="font-semibold">"{deleteConfirm?.name}"</span>?
               </p>
-              <p className="text-sm text-gray-500">
-                Esta acción no se puede deshacer.
-              </p>
+              <p className="text-sm text-gray-500">Esta acción no se puede deshacer.</p>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
                 Cancelar
               </Button>
-              <Button
-                onClick={handleConfirmDelete}
-                className="bg-red-600 hover:bg-red-700"
-              >
+              <Button onClick={handleConfirmDelete} className="bg-red-600 hover:bg-red-700">
                 Eliminar
               </Button>
             </DialogFooter>
@@ -730,16 +679,10 @@ export function QuotesSection() {
               </div>
             </div>
             <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setShowAddItemDialog(false)}
-              >
+              <Button variant="outline" onClick={() => setShowAddItemDialog(false)}>
                 Cancelar
               </Button>
-              <Button
-                onClick={handleAddItem}
-                className="bg-red-600 hover:bg-red-700"
-              >
+              <Button onClick={handleAddItem} className="bg-red-600 hover:bg-red-700">
                 Agregar
               </Button>
             </DialogFooter>
@@ -751,25 +694,17 @@ export function QuotesSection() {
     )
   }
 
-  // ====== RENDER: VISTA DE CARPETAS + LISTA DE COTIZACIONES ======
-
+  // ====== RENDER: VISTA CARPETAS + COTIZACIONES ======
   return (
     <div className="p-8">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          Cotizaciones
-        </h1>
-        <p className="text-gray-600">
-          Gestiona y visualiza todas tus cotizaciones
-        </p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">Cotizaciones</h1>
+        <p className="text-gray-600">Gestiona y visualiza todas tus cotizaciones</p>
         {error && (
           <p className="mt-2 text-sm text-red-600">
             {error}{" "}
-            <button
-              onClick={() => loadLevel(currentFolderId)}
-              className="underline"
-            >
+            <button onClick={() => loadLevel(currentFolderId)} className="underline">
               Reintentar
             </button>
           </p>
@@ -868,9 +803,7 @@ export function QuotesSection() {
           {/* Carpetas */}
           {filteredFolders.length > 0 && (
             <div className="mb-8">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">
-                Carpetas
-              </h2>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Carpetas</h2>
               {viewMode === "grid" ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {filteredFolders.map((folder) => (
@@ -897,13 +830,8 @@ export function QuotesSection() {
                       onClick={() => setCurrentFolderId(folder.id)}
                       className="w-full p-4 border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-red-300 transition text-left flex items-center gap-3"
                     >
-                      <Folder
-                        size={20}
-                        className="text-amber-500 flex-shrink-0"
-                      />
-                      <span className="font-medium text-gray-900">
-                        {folder.name}
-                      </span>
+                      <Folder size={20} className="text-amber-500 flex-shrink-0" />
+                      <span className="font-medium text-gray-900">{folder.name}</span>
                     </button>
                   ))}
                 </div>
@@ -914,9 +842,7 @@ export function QuotesSection() {
           {/* Cotizaciones */}
           {filteredQuotes.length > 0 && (
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">
-                Cotizaciones
-              </h2>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Cotizaciones</h2>
               {viewMode === "grid" ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {filteredQuotes.map((quote) => (
@@ -924,10 +850,7 @@ export function QuotesSection() {
                       key={quote.id}
                       className="p-6 border border-gray-200 rounded-lg hover:border-red-300 hover:shadow-md transition group cursor-pointer"
                     >
-                      <div
-                        onClick={() => setOpenedQuoteId(quote.id)}
-                        className="mb-4"
-                      >
+                      <div onClick={() => setOpenedQuoteId(quote.id)} className="mb-4">
                         <File
                           size={32}
                           className="text-blue-500 mb-3 group-hover:scale-110 transition"
@@ -967,17 +890,12 @@ export function QuotesSection() {
                         onClick={() => setOpenedQuoteId(quote.id)}
                         className="flex items-center gap-3 flex-1 text-left"
                       >
-                        <File
-                          size={20}
-                          className="text-blue-500 flex-shrink-0"
-                        />
+                        <File size={20} className="text-blue-500 flex-shrink-0" />
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-gray-900 group-hover:text-red-600 transition truncate">
                             {quote.name}
                           </p>
-                          <p className="text-xs text-gray-500">
-                            {quote.created_at}
-                          </p>
+                          <p className="text-xs text-gray-500">{quote.created_at}</p>
                         </div>
                       </button>
                       <button
@@ -1000,28 +918,23 @@ export function QuotesSection() {
           )}
 
           {/* Empty state */}
-          {!loading &&
-            filteredFolders.length === 0 &&
-            filteredQuotes.length === 0 && (
-              <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
-                <Folder size={48} className="mx-auto text-gray-300 mb-4" />
-                <p className="text-gray-500 text-lg">
-                  {searchQuery
-                    ? "No se encontraron resultados"
-                    : "Esta carpeta está vacía"}
-                </p>
-                <p className="text-gray-400 text-sm mt-2">
-                  {searchQuery
-                    ? "Intenta con otros términos de búsqueda"
-                    : "Crea una nueva carpeta o cotización para comenzar"}
-                </p>
-              </div>
-            )}
+          {!loading && filteredFolders.length === 0 && filteredQuotes.length === 0 && (
+            <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-12 text-center">
+              <Folder size={48} className="mx-auto text-gray-300 mb-4" />
+              <p className="text-gray-500 text-lg">
+                {searchQuery ? "No se encontraron resultados" : "Esta carpeta está vacía"}
+              </p>
+              <p className="text-gray-400 text-sm mt-2">
+                {searchQuery
+                  ? "Intenta con otros términos de búsqueda"
+                  : "Crea una nueva carpeta o cotización para comenzar"}
+              </p>
+            </div>
+          )}
         </>
       )}
 
-      {/* Dialogs para crear carpeta/cotización y confirmar delete (lista) */}
-
+      {/* Dialogs crear carpeta/cotización y delete (lista) */}
       <Dialog open={showNewFolderDialog} onOpenChange={setShowNewFolderDialog}>
         <DialogContent>
           <DialogHeader>
@@ -1034,16 +947,10 @@ export function QuotesSection() {
             onKeyDown={(e) => e.key === "Enter" && handleCreateFolder()}
           />
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowNewFolderDialog(false)}
-            >
+            <Button variant="outline" onClick={() => setShowNewFolderDialog(false)}>
               Cancelar
             </Button>
-            <Button
-              onClick={handleCreateFolder}
-              className="bg-red-600 hover:bg-red-700"
-            >
+            <Button onClick={handleCreateFolder} className="bg-red-600 hover:bg-red-700">
               Crear
             </Button>
           </DialogFooter>
@@ -1062,16 +969,10 @@ export function QuotesSection() {
             onKeyDown={(e) => e.key === "Enter" && handleCreateQuote()}
           />
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowNewQuoteDialog(false)}
-            >
+            <Button variant="outline" onClick={() => setShowNewQuoteDialog(false)}>
               Cancelar
             </Button>
-            <Button
-              onClick={handleCreateQuote}
-              className="bg-red-600 hover:bg-red-700"
-            >
+            <Button onClick={handleCreateQuote} className="bg-red-600 hover:bg-red-700">
               Crear
             </Button>
           </DialogFooter>
@@ -1089,23 +990,15 @@ export function QuotesSection() {
           <div className="space-y-4">
             <p className="text-gray-700">
               ¿Estás seguro que deseas eliminar{" "}
-              <span className="font-semibold">
-                "{deleteConfirm?.name}"
-              </span>
-              ?
+              <span className="font-semibold">"{deleteConfirm?.name}"</span>?
             </p>
-            <p className="text-sm text-gray-500">
-              Esta acción no se puede deshacer.
-            </p>
+            <p className="text-sm text-gray-500">Esta acción no se puede deshacer.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
               Cancelar
             </Button>
-            <Button
-              onClick={handleConfirmDelete}
-              className="bg-red-600 hover:bg-red-700"
-            >
+            <Button onClick={handleConfirmDelete} className="bg-red-600 hover:bg-red-700">
               Eliminar
             </Button>
           </DialogFooter>
