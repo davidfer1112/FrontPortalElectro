@@ -30,7 +30,7 @@ import { installationPointsService } from "@/services/installationPointsService"
 import { quoteCatalogItemsService } from "@/services/quoteCatalogItemsService"
 import { cablesAndAccessoriesService } from "@/services/cablesAndAccessoriesService"
 import { catalogService } from "@/services/catalogService"
-// Ajusta el nombre/ruta si tu servicio se llama distinto:
+// Asegúrate de que este servicio exista con este nombre
 import { quoteCablesService } from "@/services/quoteCablesService"
 
 import type { Folder as FolderModel } from "@/models/folder.model"
@@ -84,7 +84,7 @@ export function QuotesSection() {
   const [quotes, setQuotes] = useState<QuoteModel[]>([])
   const [breadcrumb, setBreadcrumb] = useState<FolderModel[]>([])
 
-  // Detalle de cotización (líneas reales)
+  // Detalle de cotización
   const [installationPoints, setInstallationPoints] = useState<InstallationPoint[]>([])
   const [quoteCables, setQuoteCables] = useState<QuoteCable[]>([])
   const [quoteCatalogItems, setQuoteCatalogItems] = useState<QuoteCatalogItem[]>([])
@@ -102,11 +102,15 @@ export function QuotesSection() {
   // Dialog agregar ítem
   const [showAddItemDialog, setShowAddItemDialog] = useState(false)
   const [itemType, setItemType] = useState<"cable" | "catalog" | "installation">("cable")
-  const [newItemName, setNewItemName] = useState("") // usado para instalación (type)
+  const [newItemName, setNewItemName] = useState("") // para instalación
   const [newItemQuantity, setNewItemQuantity] = useState("")
   const [newItemPrice, setNewItemPrice] = useState("")
   const [selectedCableId, setSelectedCableId] = useState<string>("")
   const [selectedCatalogId, setSelectedCatalogId] = useState<string>("")
+
+  // 🔍 buscadores en los popups
+  const [cableSearch, setCableSearch] = useState("")
+  const [catalogSearch, setCatalogSearch] = useState("")
 
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid")
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null)
@@ -123,24 +127,20 @@ export function QuotesSection() {
   // ==========================================================
   // CARGA DE CARPETAS + COTIZACIONES DEL NIVEL
   // ==========================================================
-
   const loadLevel = useCallback(
     async (folderId: number | null) => {
       try {
         setLoading(true)
         setError(null)
 
-        // 1) Obtener todas las carpetas
         const foldersRes = await foldersService.getAll()
         setAllFolders(foldersRes)
 
-        // 2) Filtrar solo las hijas del nivel actual
         const levelFolders = foldersRes.filter((f) =>
           folderId === null ? f.parent_id === null : f.parent_id === folderId,
         )
         setFolders(levelFolders)
 
-        // 3) Cotizaciones del nivel actual
         if (folderId !== null) {
           const quotesRes = await quotesService.getAll(folderId)
           setQuotes(quotesRes)
@@ -148,7 +148,6 @@ export function QuotesSection() {
           setQuotes([])
         }
 
-        // 4) Breadcrumb
         const path: FolderModel[] = []
         let current = folderId
         while (current !== null) {
@@ -173,7 +172,7 @@ export function QuotesSection() {
   }, [currentFolderId, loadLevel])
 
   // ==========================================================
-  // CARGA DE CATÁLOGOS (cables y productos) UNA VEZ
+  // CARGA CATÁLOGOS AUXILIARES
   // ==========================================================
   useEffect(() => {
     const loadCatalogs = async () => {
@@ -193,7 +192,7 @@ export function QuotesSection() {
   }, [])
 
   // ==========================================================
-  // CARGAR DETALLE DE UNA COTIZACIÓN
+  // CARGAR DETALLE DE COTIZACIÓN
   // ==========================================================
   const loadQuoteDetails = useCallback(async (quoteId: number) => {
     try {
@@ -216,7 +215,6 @@ export function QuotesSection() {
     if (openedQuoteId) {
       loadQuoteDetails(openedQuoteId)
     } else {
-      // si cerramos la cotización, limpiamos detalles
       setInstallationPoints([])
       setQuoteCables([])
       setQuoteCatalogItems([])
@@ -224,7 +222,7 @@ export function QuotesSection() {
   }, [openedQuoteId, loadQuoteDetails])
 
   // ==========================================================
-  // CREAR CARPETA
+  // CREAR CARPETA / COTIZACIÓN
   // ==========================================================
   const handleCreateFolder = async () => {
     if (!newFolderName.trim()) return
@@ -252,9 +250,6 @@ export function QuotesSection() {
     }
   }
 
-  // ==========================================================
-  // CREAR COTIZACIÓN
-  // ==========================================================
   const handleCreateQuote = async () => {
     if (!newQuoteName.trim()) return
 
@@ -279,7 +274,7 @@ export function QuotesSection() {
   }
 
   // ==========================================================
-  // FILTROS BUSCADOR
+  // FILTROS LISTA PRINCIPAL
   // ==========================================================
   const filteredFolders = folders.filter(
     (f) => searchQuery === "" || f.name.toLowerCase().includes(searchQuery.toLowerCase()),
@@ -290,7 +285,7 @@ export function QuotesSection() {
   )
 
   // ==========================================================
-  // HELPERS DETALLE COTIZACIÓN
+  // DETALLE COTIZACIÓN
   // ==========================================================
   const selectedQuote = quotes.find((q) => q.id === openedQuoteId) || null
 
@@ -322,7 +317,7 @@ export function QuotesSection() {
   }
 
   // ==========================================================
-  // AGREGAR ÍTEM (instalación, cable, catálogo)
+  // AGREGAR ÍTEM
   // ==========================================================
   const resetItemDialogState = () => {
     setNewItemName("")
@@ -330,6 +325,8 @@ export function QuotesSection() {
     setNewItemPrice("")
     setSelectedCableId("")
     setSelectedCatalogId("")
+    setCableSearch("")
+    setCatalogSearch("")
   }
 
   const handleAddItem = async () => {
@@ -404,18 +401,33 @@ export function QuotesSection() {
     }
   }
 
-  // precio por defecto al seleccionar cable
+  // Precio por defecto cuando eliges cable
   useEffect(() => {
     if (itemType === "cable" && selectedCableId) {
       const cable = availableCables.find((c) => c.id === Number(selectedCableId))
-      if (cable) {
-        setNewItemPrice(cable.price)
-      }
+      if (cable) setNewItemPrice(cable.price)
     }
   }, [itemType, selectedCableId, availableCables])
 
+  // 🔍 Cables filtrados por buscador (nombre)
+  const filteredCablesForDialog = availableCables.filter((c) => {
+    if (!cableSearch.trim()) return true
+    const term = cableSearch.toLowerCase()
+    return c.name.toLowerCase().includes(term)
+  })
+
+  // 🔍 Productos de catálogo filtrados por referencia o descripción
+  const filteredCatalogForDialog = availableCatalogProducts.filter((p) => {
+    if (!catalogSearch.trim()) return true
+    const term = catalogSearch.toLowerCase()
+    return (
+      p.reference.toLowerCase().includes(term) ||
+      p.description.toLowerCase().includes(term)
+    )
+  })
+
   // ==========================================================
-  // ELIMINAR (cotización o línea)
+  // ELIMINAR
   // ==========================================================
   const handleConfirmDelete = async () => {
     if (!deleteConfirm) return
@@ -692,7 +704,9 @@ export function QuotesSection() {
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="text-left py-3 px-4 font-semibold text-gray-900">Tipo</th>
+                    <th className="text-left py-3 px-4 font-semibold text-gray-900">
+                      Tipo
+                    </th>
                     <th className="text-center py-3 px-4 font-semibold text-gray-900">
                       Cantidad
                     </th>
@@ -781,7 +795,7 @@ export function QuotesSection() {
           </div>
         </div>
 
-        {/* Dialog delete detalle */}
+        {/* Dialog confirmar delete en detalle */}
         <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
           <DialogContent>
             <DialogHeader>
@@ -823,6 +837,7 @@ export function QuotesSection() {
             </DialogHeader>
 
             <div className="space-y-4">
+              {/* INSTALACIÓN */}
               {itemType === "installation" && (
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-1 block">
@@ -837,45 +852,81 @@ export function QuotesSection() {
                 </div>
               )}
 
+              {/* CABLES Y ACCESORIOS */}
               {itemType === "cable" && (
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1 block">
-                    Cable / Accesorio
-                  </label>
-                  <select
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                    value={selectedCableId}
-                    onChange={(e) => setSelectedCableId(e.target.value)}
-                  >
-                    <option value="">Selecciona un cable o accesorio</option>
-                    {availableCables.map((cable) => (
-                      <option key={cable.id} value={cable.id}>
-                        {cable.name} — ${Number(cable.price).toFixed(2)} / {cable.measurement_type}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">
+                      Buscar cable / accesorio
+                    </label>
+                    <Input
+                      placeholder="Ej: UTP, coaxial..."
+                      value={cableSearch}
+                      onChange={(e) => setCableSearch(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">
+                      Cable / Accesorio
+                    </label>
+                    <select
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                      value={selectedCableId}
+                      onChange={(e) => setSelectedCableId(e.target.value)}
+                    >
+                      <option value="">Selecciona un cable o accesorio</option>
+                      {filteredCablesForDialog.map((cable) => (
+                        <option key={cable.id} value={cable.id}>
+                          {cable.name} — ${Number(cable.price).toFixed(2)} /{" "}
+                          {cable.measurement_type}
+                        </option>
+                      ))}
+                    </select>
+                    {filteredCablesForDialog.length === 0 && cableSearch && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        No se encontraron cables para &quot;{cableSearch}&quot;
+                      </p>
+                    )}
+                  </div>
+                </>
               )}
 
+              {/* PRODUCTOS DE CATÁLOGO */}
               {itemType === "catalog" && (
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1 block">
-                    Producto de catálogo
-                  </label>
-                  <select
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                    value={selectedCatalogId}
-                    onChange={(e) => setSelectedCatalogId(e.target.value)}
-                  >
-                    <option value="">Selecciona un producto</option>
-                    {availableCatalogProducts.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.reference} — {p.description} — $
-                        {Number(p.price).toFixed(2)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">
+                      Buscar producto (referencia o descripción)
+                    </label>
+                    <Input
+                      placeholder="Ej: CAM-4MP, NVR, disco duro..."
+                      value={catalogSearch}
+                      onChange={(e) => setCatalogSearch(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">
+                      Producto de catálogo
+                    </label>
+                    <select
+                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                      value={selectedCatalogId}
+                      onChange={(e) => setSelectedCatalogId(e.target.value)}
+                    >
+                      <option value="">Selecciona un producto</option>
+                      {filteredCatalogForDialog.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.reference} — {p.description} — ${Number(p.price).toFixed(2)}
+                        </option>
+                      ))}
+                    </select>
+                    {filteredCatalogForDialog.length === 0 && catalogSearch && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        No se encontraron productos para &quot;{catalogSearch}&quot;
+                      </p>
+                    )}
+                  </div>
+                </>
               )}
 
               <div>
@@ -890,7 +941,7 @@ export function QuotesSection() {
                 />
               </div>
 
-              {(itemType === "installation" || itemType === "cable") && (
+              {/* {(itemType === "installation" || itemType === "cable") && (
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-1 block">
                     Precio Unitario
@@ -903,7 +954,7 @@ export function QuotesSection() {
                     onChange={(e) => setNewItemPrice(e.target.value)}
                   />
                 </div>
-              )}
+              )} */}
             </div>
 
             <DialogFooter>
@@ -1216,7 +1267,7 @@ export function QuotesSection() {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog delete lista */}
+      {/* Dialog delete en lista */}
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
         <DialogContent>
           <DialogHeader>
