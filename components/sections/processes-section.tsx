@@ -1,48 +1,84 @@
 "use client"
 
-import { useState, useRef } from "react"
-import { ChevronRight, AlertCircle, Plus, CheckCircle, X, Send, AlertOctagon, Package, CheckSquare, Truck, Zap, FileSignature, Edit2, Trash2, RotateCcw } from 'lucide-react'
+import { useEffect, useState, useRef } from "react"
+import {
+  ChevronRight,
+  AlertCircle,
+  Plus,
+  CheckCircle,
+  X,
+  Send,
+  AlertOctagon,
+  Package,
+  CheckSquare,
+  Truck,
+  Zap,
+  FileSignature,
+  Edit2,
+  Trash2,
+  RotateCcw,
+} from "lucide-react"
 import SignatureCanvas from "react-signature-canvas"
 
-interface Process {
-  id: number
-  name: string
-  status: "pending" | "in_progress" | "completed" | "cancelled"
-  assigned_to: number
-  created_by: number
-  quote_id: number | null
-  created_at: string
-  updated_at: string
+import type { Process } from "@/models/process.model"
+import type { ProcessMaterial } from "@/models/process-material.model"
+import type { ProcessNote } from "@/models/process-note.model"
+import type { ProcessAlert } from "@/models/process-alert.model"
+import type { ServiceReport } from "@/models/service-report.model"
+
+import { processesService } from "@/services/processesService"
+import { processMaterialsService } from "@/services/processMaterialsService"
+import { processNotesService } from "@/services/processNotesService"
+import { processAlertsService } from "@/services/processAlertsService"
+import { serviceReportsService } from "@/services/serviceReportsService"
+import { processHistoryService } from "@/services/processHistoryService"
+
+// ================== TIPOS AUXILIARES FRONT ==================
+
+type ProcessWithStage = Process & {
+  // campo sólo de frontend para pintar el flujo
   current_stage: number
-  client_signature: string | null
+  client_signature?: string | null
 }
 
-interface ProcessDetail extends Process {
-  materials: Array<{
-    id: number
-    name: string
-    quantity: number
-  }>
-  notes: Array<{
-    id: number
-    note: string
-    created_by: string
-    created_at: string
-  }>
-  alerts: Array<{
-    id: number
-    alert_type: string
-    message: string
-    status: "active" | "resolved"
-    created_at: string
-    resolved_at: string | null
-  }>
-  stage_progress: Array<{
-    stage: number
-    status: "pending" | "in_progress" | "completed"
-    completed_at: string | null
-  }>
+interface ProcessDetail extends ProcessWithStage {
+  materials: ProcessMaterial[]
+  notes: ProcessNote[]
+  alerts: ProcessAlert[]
+  serviceReport: ServiceReport | null
 }
+
+// Estado del formulario de reporte de servicio
+type ServiceReportFormState = {
+  id?: number
+} & {
+  process_id: number
+  city: string
+  service_date: string
+  address: string
+  requested_by: string
+  email: string
+  phone: string
+  nit_document: string
+  company: string
+  service_value: string
+  service_value_note: string
+  service_description: string
+  pending: number
+  pending_description: string
+  previous_service_charged: number
+  warranty: number
+  solved: number
+  training_given: number
+  ads_installed: number
+  equipment_tests: number
+  work_area_clean: number
+  entry_time: string
+  exit_time: string
+  representative_name: string
+}
+
+// ================== CONST ETAPAS ==================
 
 const PROCESS_STAGES = [
   {
@@ -51,8 +87,6 @@ const PROCESS_STAGES = [
     description: "Administrador crea el proceso",
     icon: Plus,
     color: "bg-blue-50",
-    textColor: "text-blue-700",
-    borderColor: "border-blue-200",
   },
   {
     id: 2,
@@ -60,8 +94,6 @@ const PROCESS_STAGES = [
     description: "Almacén alista materiales",
     icon: Package,
     color: "bg-yellow-50",
-    textColor: "text-yellow-700",
-    borderColor: "border-yellow-200",
   },
   {
     id: 3,
@@ -69,8 +101,6 @@ const PROCESS_STAGES = [
     description: "Coordinador de Tecnología revisa",
     icon: CheckSquare,
     color: "bg-purple-50",
-    textColor: "text-purple-700",
-    borderColor: "border-purple-200",
   },
   {
     id: 4,
@@ -78,8 +108,6 @@ const PROCESS_STAGES = [
     description: "Técnico verifica completitud",
     icon: AlertCircle,
     color: "bg-orange-50",
-    textColor: "text-orange-700",
-    borderColor: "border-orange-200",
   },
   {
     id: 5,
@@ -87,8 +115,6 @@ const PROCESS_STAGES = [
     description: "Traslado al sitio",
     icon: Truck,
     color: "bg-cyan-50",
-    textColor: "text-cyan-700",
-    borderColor: "border-cyan-200",
   },
   {
     id: 6,
@@ -96,8 +122,6 @@ const PROCESS_STAGES = [
     description: "Instalación",
     icon: Zap,
     color: "bg-green-50",
-    textColor: "text-green-700",
-    borderColor: "border-green-200",
   },
   {
     id: 7,
@@ -105,143 +129,49 @@ const PROCESS_STAGES = [
     description: "Requiere firma del cliente",
     icon: FileSignature,
     color: "bg-red-50",
-    textColor: "text-red-700",
-    borderColor: "border-red-200",
   },
 ]
 
-const mockProcesses: Process[] = [
-  {
-    id: 1,
-    name: "Instalación Sistema Alarma - Edificio A",
-    status: "in_progress",
-    assigned_to: 2,
-    created_by: 1,
-    quote_id: 1,
-    created_at: "2025-11-10T08:00:00",
-    updated_at: "2025-11-12T14:30:00",
-    current_stage: 3,
-    client_signature: null,
-  },
-  {
-    id: 2,
-    name: "Mantenimiento Preventivo - Sucursal B",
-    status: "pending",
-    assigned_to: 3,
-    created_by: 1,
-    quote_id: 2,
-    created_at: "2025-11-11T10:00:00",
-    updated_at: "2025-11-11T10:00:00",
-    current_stage: 1,
-    client_signature: null,
-  },
-  {
-    id: 3,
-    name: "Actualización Cámaras - Centro Comercial",
-    status: "completed",
-    assigned_to: 2,
-    created_by: 1,
-    quote_id: 3,
-    created_at: "2025-11-05T09:00:00",
-    updated_at: "2025-11-09T17:00:00",
-    current_stage: 7,
-    client_signature: "data:image/png;base64,iVBORw0KGgo...",
-  },
-]
+// ================== HELPERS ==================
 
-const mockProcessDetails: Record<number, ProcessDetail> = {
-  1: {
-    ...mockProcesses[0],
-    materials: [
-      { id: 1, name: "Cámaras 1080p", quantity: 4 },
-      { id: 2, name: "Cable Cat6 50m", quantity: 2 },
-      { id: 3, name: "Conectores RJ45", quantity: 20 },
-    ],
-    notes: [
-      {
-        id: 1,
-        note: "Instalación iniciada en sector norte del edificio",
-        created_by: "Juan García",
-        created_at: "2025-11-10T08:30:00",
-      },
-      {
-        id: 2,
-        note: "Se completó la instalación de sensores. Falta calibración.",
-        created_by: "María López",
-        created_at: "2025-11-11T16:45:00",
-      },
-      {
-        id: 3,
-        note: "Cliente solicita agregar 2 cámaras adicionales en entrada principal",
-        created_by: "Carlos Rodríguez",
-        created_at: "2025-11-12T10:15:00",
-      },
-    ],
-    alerts: [
-      {
-        id: 1,
-        alert_type: "warning",
-        message: "Material faltante: Necesita 2 más de cable Cat6",
-        status: "active",
-        created_at: "2025-11-11T14:00:00",
-        resolved_at: null,
-      },
-      {
-        id: 2,
-        alert_type: "info",
-        message: "Cliente no estará disponible después de las 18:00",
-        status: "active",
-        created_at: "2025-11-12T09:30:00",
-        resolved_at: null,
-      },
-    ],
-    stage_progress: [
-      { stage: 1, status: "completed", completed_at: "2025-11-10T08:00:00" },
-      { stage: 2, status: "completed", completed_at: "2025-11-10T14:30:00" },
-      { stage: 3, status: "in_progress", completed_at: null },
-      { stage: 4, status: "pending", completed_at: null },
-      { stage: 5, status: "pending", completed_at: null },
-      { stage: 6, status: "pending", completed_at: null },
-      { stage: 7, status: "pending", completed_at: null },
-    ],
-  },
+function mapStatusToStage(status: string): number {
+  switch (status) {
+    case "pending":
+      return 1
+    case "in_progress":
+      return 3
+    case "done":
+    case "completed":
+      return 7
+    default:
+      return 1
+  }
 }
 
-function ProcessTimeline({ process }: { process: ProcessDetail }) {
+type ToastState = { message: string; type: "success" | "error" | "info" } | null
+
+// ================== COMPONENTES ==================
+
+function ProcessTimeline({ process }: { process: ProcessWithStage }) {
   return (
     <div className="mb-8">
       <h3 className="font-semibold text-gray-900 mb-6">Flujo del Proceso</h3>
       <div className="relative">
         <div className="flex items-center justify-between">
-          {PROCESS_STAGES.map((stage, index) => {
-            const progress = process.stage_progress.find((p) => p.stage === stage.id)
-            const isCompleted = progress?.status === "completed"
-            const isActive = progress?.status === "in_progress"
+          {PROCESS_STAGES.map((stage) => {
+            const isCompleted = stage.id < process.current_stage
+            const isActive = stage.id === process.current_stage
             const StageIcon = stage.icon
 
             return (
               <div key={stage.id} className="flex flex-col items-center flex-1">
-                {/* Línea conectora */}
-                {index < PROCESS_STAGES.length - 1 && (
-                  <div
-                    className={`absolute top-10 left-[50%] w-[calc(100%-theme(spacing.10))] h-1 ${
-                      isCompleted ? "bg-green-500" : "bg-gray-200"
-                    }`}
-                    style={{
-                      left: `calc(50% + theme(spacing.5))`,
-                      width: `calc(100% - theme(spacing.10))`,
-                    }}
-                  />
-                )}
-
-                {/* Círculo del estado */}
                 <div
-                  className={`relative z-10 w-20 h-20 rounded-full flex items-center justify-center border-2 transition-all ${
+                  className={`w-20 h-20 rounded-full flex items-center justify-center border-2 transition-all ${
                     isCompleted
                       ? "bg-green-100 border-green-500"
                       : isActive
-                        ? `${stage.color} border-2 border-red-500 animate-pulse`
-                        : "bg-gray-100 border-gray-300"
+                      ? `${stage.color} border-red-500 animate-pulse`
+                      : "bg-gray-100 border-gray-300"
                   }`}
                 >
                   <StageIcon
@@ -250,16 +180,9 @@ function ProcessTimeline({ process }: { process: ProcessDetail }) {
                     }`}
                   />
                 </div>
-
-                {/* Información de etapa */}
                 <div className="mt-4 text-center">
                   <p className="font-semibold text-gray-900 text-sm">{stage.name}</p>
                   <p className="text-xs text-gray-600 mt-1">{stage.description}</p>
-                  {isCompleted && progress.completed_at && (
-                    <p className="text-xs text-green-600 mt-2">
-                      Completado: {new Date(progress.completed_at).toLocaleDateString()}
-                    </p>
-                  )}
                 </div>
               </div>
             )
@@ -270,95 +193,292 @@ function ProcessTimeline({ process }: { process: ProcessDetail }) {
   )
 }
 
-function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onClose: () => void }) {
-  const [activeTab, setActiveTab] = useState<"timeline" | "materials" | "notes" | "alerts" | "firma">("timeline")
-  const [newNote, setNewNote] = useState("")
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null)
-  const [toast, setToast] = useState<{ message: string; type: string } | null>(null)
-  const [showSignaturePad, setShowSignaturePad] = useState(false)
+function ProcessDetailModal({
+  process,
+  onClose,
+  onUpdated,
+}: {
+  process: ProcessDetail
+  onClose: () => void
+  onUpdated: (p: ProcessDetail) => void
+}) {
+  const [activeTab, setActiveTab] = useState<"timeline" | "materials" | "notes" | "alerts" | "report">("timeline")
+
+  // Estado local de datos asociados
+  const [materials] = useState<ProcessMaterial[]>(process.materials)
+  const [notes, setNotes] = useState<ProcessNote[]>(process.notes)
+  const [alerts] = useState<ProcessAlert[]>(process.alerts)
+  const [serviceReport, setServiceReport] = useState<ServiceReport | null>(process.serviceReport)
+
+  // Edición básica del proceso
   const [isEditing, setIsEditing] = useState(false)
   const [editData, setEditData] = useState({
     name: process.name,
     status: process.status,
     assigned_to: process.assigned_to,
   })
-  const signatureCanvasRef = useRef<SignatureCanvas | null>(null)
-  const [clientSignature, setClientSignature] = useState<string | null>(process.client_signature)
 
-  const handleAddNote = () => {
-    if (newNote.trim()) {
-      setToast({ message: "Nota agregada exitosamente", type: "success" })
-      setNewNote("")
-      setTimeout(() => setToast(null), 2000)
+  // Notas
+  const [newNote, setNewNote] = useState("")
+  const [showDeleteNoteId, setShowDeleteNoteId] = useState<number | null>(null)
+
+  // Reporte de servicio
+  const [reportForm, setReportForm] = useState<ServiceReportFormState>(() => {
+    if (serviceReport) {
+      return {
+        id: serviceReport.id,
+        process_id: serviceReport.process_id,
+        city: serviceReport.city,
+        service_date: serviceReport.service_date.slice(0, 10),
+        address: serviceReport.address,
+        requested_by: serviceReport.requested_by,
+        email: serviceReport.email,
+        phone: serviceReport.phone,
+        nit_document: serviceReport.nit_document,
+        company: serviceReport.company,
+        service_value: serviceReport.service_value,
+        service_value_note: serviceReport.service_value_note,
+        service_description: serviceReport.service_description,
+        pending: serviceReport.pending,
+        pending_description: serviceReport.pending_description,
+        previous_service_charged: serviceReport.previous_service_charged,
+        warranty: serviceReport.warranty,
+        solved: serviceReport.solved,
+        training_given: serviceReport.training_given,
+        ads_installed: serviceReport.ads_installed,
+        equipment_tests: serviceReport.equipment_tests,
+        work_area_clean: serviceReport.work_area_clean,
+        entry_time: serviceReport.entry_time,
+        exit_time: serviceReport.exit_time,
+        representative_name: serviceReport.representative_name,
+      }
+    }
+
+    // valores por defecto para crear
+    return {
+      process_id: process.id,
+      city: "",
+      service_date: new Date().toISOString().slice(0, 10),
+      address: "",
+      requested_by: "",
+      email: "",
+      phone: "",
+      nit_document: "",
+      company: "",
+      service_value: "",
+      service_value_note: "",
+      service_description: "",
+      pending: 0,
+      pending_description: "",
+      previous_service_charged: 0,
+      warranty: 0,
+      solved: 1,
+      training_given: 0,
+      ads_installed: 0,
+      equipment_tests: 0,
+      work_area_clean: 0,
+      entry_time: "08:00:00",
+      exit_time: "17:00:00",
+      representative_name: "",
+    }
+  })
+
+  // Firma (solo frontend)
+  const [clientSignature, setClientSignature] = useState<string | null>(null)
+  const [showSignaturePad, setShowSignaturePad] = useState(false)
+  const signatureCanvasRef = useRef<SignatureCanvas | null>(null)
+
+  const [toast, setToast] = useState<ToastState>(null)
+  const showToast = (
+  message: string,
+  type: "success" | "error" | "info" = "success") => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 2500)
+  }
+
+  // ======== acciones proceso ========
+
+  const handleSaveEdit = async () => {
+    try {
+      const oldStatus = process.status
+      await processesService.update(process.id, {
+        name: editData.name,
+        status: editData.status,
+        assigned_to: editData.assigned_to,
+      })
+
+      // guardamos entrada de historial
+      await processHistoryService.create({
+        process_id: process.id,
+        old_status: oldStatus,
+        new_status: editData.status,
+        changed_by: process.assigned_to, // aquí luego puedes cambiar por el usuario logueado
+        note: "Actualización desde panel de procesos",
+      })
+
+      const updated: ProcessDetail = {
+        ...process,
+        name: editData.name,
+        status: editData.status,
+        assigned_to: editData.assigned_to,
+        current_stage: mapStatusToStage(editData.status),
+        materials,
+        notes,
+        alerts,
+        serviceReport,
+      }
+      onUpdated(updated)
+      setIsEditing(false)
+      showToast("Proceso actualizado correctamente", "success")
+    } catch (err) {
+      console.error(err)
+      showToast("No se pudo actualizar el proceso", "error")
     }
   }
 
-  const handleDeleteNote = (id: number) => {
-    setToast({ message: "Nota eliminada", type: "success" })
-    setShowDeleteConfirm(null)
-    setTimeout(() => setToast(null), 2000)
+  // ======== notas ========
+
+  const handleAddNote = async () => {
+    if (!newNote.trim()) return
+    try {
+      const created = await processNotesService.create({
+        process_id: process.id,
+        note: newNote.trim(),
+      })
+      setNotes((prev) => [...prev, created])
+      setNewNote("")
+      showToast("Nota agregada", "success")
+    } catch (err) {
+      console.error(err)
+      showToast("No se pudo agregar la nota", "error")
+    }
   }
+
+  const handleDeleteNote = async (noteId: number) => {
+    try {
+      await processNotesService.remove(noteId)
+      setNotes((prev) => prev.filter((n) => n.id !== noteId))
+      setShowDeleteNoteId(null)
+      showToast("Nota eliminada", "success")
+    } catch (err) {
+      console.error(err)
+      showToast("No se pudo eliminar la nota", "error")
+    }
+  }
+
+  // ======== firma ========
 
   const handleSignature = () => {
-    if (signatureCanvasRef.current) {
-      const signatureData = signatureCanvasRef.current.toDataURL("image/png")
-      setClientSignature(signatureData)
-      setToast({ message: "Firma del cliente registrada exitosamente", type: "success" })
-      setShowSignaturePad(false)
-      setTimeout(() => setToast(null), 2000)
-    }
+    if (!signatureCanvasRef.current) return
+    const data = signatureCanvasRef.current.toDataURL("image/png")
+    setClientSignature(data)
+    setShowSignaturePad(false)
+    showToast("Firma registrada (solo visual)", "success")
   }
 
   const clearSignature = () => {
-    if (signatureCanvasRef.current) {
-      signatureCanvasRef.current.clear()
+    signatureCanvasRef.current?.clear()
+  }
+
+  // ======== reporte de servicio ========
+
+  const handleReportFieldChange = (field: keyof ServiceReportFormState, value: string | number) => {
+    setReportForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }))
+  }
+
+  const handleToggleFlag = (field: keyof ServiceReportFormState) => {
+    setReportForm((prev) => ({
+      ...prev,
+      [field]: prev[field] === 1 ? 0 : 1,
+    }))
+  }
+
+  const handleSaveReport = async () => {
+    try {
+      if (reportForm.id) {
+        const { id, ...body } = reportForm
+        const updated = await serviceReportsService.update(id, body)
+        setServiceReport(updated)
+        showToast("Reporte actualizado correctamente", "success")
+      } else {
+        const { id, ...body } = reportForm
+        const created = await serviceReportsService.create(body)
+        setServiceReport(created)
+        setReportForm((prev) => ({ ...prev, id: created.id }))
+        showToast("Reporte creado correctamente", "success")
+      }
+    } catch (err) {
+      console.error(err)
+      showToast("No se pudo guardar el reporte", "error")
     }
   }
 
-  const handleSaveEdit = () => {
-    console.log("[v0] Proceso editado:", editData)
-    setToast({ message: "Proceso actualizado exitosamente", type: "success" })
-    setIsEditing(false)
-    setTimeout(() => setToast(null), 2000)
+  // ================== RENDER ==================
+
+  const updatedProcess: ProcessDetail = {
+    ...process,
+    name: editData.name,
+    status: editData.status,
+    current_stage: mapStatusToStage(editData.status),
+    materials,
+    notes,
+    alerts,
+    serviceReport,
   }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg w-full max-w-5xl max-h-[95vh] overflow-hidden flex flex-col">
+      <div className="bg-white rounded-lg w-full max-w-6xl max-h-[95vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="border-b p-6 flex justify-between items-start bg-gradient-to-r from-gray-50 to-white">
-          <div>
+          <div className="flex-1">
             {isEditing ? (
               <div className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium text-gray-700 mb-1 block">Nombre del Proceso</label>
+                  <label className="text-sm font-medium text-gray-700 mb-1 block">
+                    Nombre del Proceso
+                  </label>
                   <input
                     type="text"
                     value={editData.name}
-                    onChange={(e) => setEditData({ ...editData, name: e.target.value })}
+                    onChange={(e) => setEditData((prev) => ({ ...prev, name: e.target.value }))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-red-500"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-sm font-medium text-gray-700 mb-1 block">Estado</label>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">
+                      Estado
+                    </label>
                     <select
                       value={editData.status}
-                      onChange={(e) => setEditData({ ...editData, status: e.target.value as any })}
+                      onChange={(e) =>
+                        setEditData((prev) => ({ ...prev, status: e.target.value }))
+                      }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-red-500"
                     >
                       <option value="pending">Pendiente</option>
                       <option value="in_progress">En Progreso</option>
-                      <option value="completed">Completado</option>
+                      <option value="done">Finalizado</option>
                       <option value="cancelled">Cancelado</option>
                     </select>
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-gray-700 mb-1 block">Asignado a</label>
+                    <label className="text-sm font-medium text-gray-700 mb-1 block">
+                      ID Usuario Asignado
+                    </label>
                     <input
                       type="number"
                       value={editData.assigned_to}
-                      onChange={(e) => setEditData({ ...editData, assigned_to: Number.parseInt(e.target.value) })}
+                      onChange={(e) =>
+                        setEditData((prev) => ({
+                          ...prev,
+                          assigned_to: Number.parseInt(e.target.value || "0"),
+                        }))
+                      }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-red-500"
                     />
                   </div>
@@ -382,7 +502,14 @@ function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onCl
               <>
                 <h2 className="text-2xl font-bold text-gray-900">{process.name}</h2>
                 <p className="text-sm text-gray-600 mt-2">
-                  Etapa: <span className="font-semibold">{PROCESS_STAGES[process.current_stage - 1]?.name}</span>
+                  Etapa actual:{" "}
+                  <span className="font-semibold">
+                    {PROCESS_STAGES[updatedProcess.current_stage - 1]?.name}
+                  </span>
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Creado: {new Date(process.created_at).toLocaleString()} • Actualizado:{" "}
+                  {new Date(process.updated_at).toLocaleString()}
                 </p>
               </>
             )}
@@ -394,10 +521,10 @@ function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onCl
 
         {/* Tabs */}
         <div className="border-b flex gap-0 bg-gray-50 overflow-x-auto">
-          {["timeline", "materials", "notes", "alerts", "firma"].map((tab) => (
+          {(["timeline", "materials", "notes", "alerts", "report"] as const).map((tab) => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab as any)}
+              onClick={() => setActiveTab(tab)}
               className={`px-6 py-3 font-medium text-sm border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === tab
                   ? "text-red-600 border-red-500"
@@ -408,36 +535,42 @@ function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onCl
               {tab === "materials" && "Materiales"}
               {tab === "notes" && "Notas"}
               {tab === "alerts" && "Alertas"}
-              {tab === "firma" && "Firma Cliente"}
+              {tab === "report" && "Reporte Servicio Técnico"}
             </button>
           ))}
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
-          {activeTab === "timeline" && <ProcessTimeline process={process} />}
+          {activeTab === "timeline" && <ProcessTimeline process={updatedProcess} />}
 
           {activeTab === "materials" && (
             <div className="space-y-4">
-              {process.materials.length > 0 ? (
-                <div className="overflow-x-auto">
+              {materials.length > 0 ? (
+                <div className="overflow-x-auto border border-gray-200 rounded-lg">
                   <table className="w-full">
-                    <thead>
+                    <thead className="bg-gray-50">
                       <tr className="border-b">
-                        <th className="text-left py-3 px-4 font-semibold text-gray-900">Material</th>
-                        <th className="text-left py-3 px-4 font-semibold text-gray-900">Cantidad</th>
-                        <th className="text-left py-3 px-4 font-semibold text-gray-900">Estado</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900">
+                          Producto
+                        </th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900">
+                          Cantidad
+                        </th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-gray-900">
+                          Origen
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {process.materials.map((material) => (
-                        <tr key={material.id} className="border-b hover:bg-gray-50">
-                          <td className="py-4 px-4 text-gray-900 font-medium">{material.name}</td>
-                          <td className="py-4 px-4 text-gray-900">{material.quantity}</td>
-                          <td className="py-4 px-4">
-                            <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
-                              Disponible
-                            </span>
+                      {materials.map((m) => (
+                        <tr key={m.id} className="border-b hover:bg-gray-50">
+                          <td className="py-3 px-4 text-gray-900">
+                            {m.catalog_description || m.cable_name}
+                          </td>
+                          <td className="py-3 px-4 text-gray-900">{m.quantity}</td>
+                          <td className="py-3 px-4 text-gray-700 text-sm">
+                            {m.catalog_id ? "Catálogo" : "Cable/Accesorio"}
                           </td>
                         </tr>
                       ))}
@@ -445,7 +578,7 @@ function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onCl
                   </table>
                 </div>
               ) : (
-                <p className="text-gray-600">No hay materiales asignados</p>
+                <p className="text-gray-600">No hay materiales asociados al proceso.</p>
               )}
             </div>
           )}
@@ -453,17 +586,20 @@ function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onCl
           {activeTab === "notes" && (
             <div className="space-y-4">
               <div className="space-y-3">
-                {process.notes.map((note) => (
-                  <div key={note.id} className="bg-gray-50 p-4 rounded-lg border border-gray-200 relative group">
+                {notes.map((note) => (
+                  <div
+                    key={note.id}
+                    className="bg-gray-50 p-4 rounded-lg border border-gray-200 relative group"
+                  >
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
-                        <p className="text-gray-900 font-medium">{note.note}</p>
+                        <p className="text-gray-900 text-sm">{note.note}</p>
                         <p className="text-xs text-gray-600 mt-2">
-                          {note.created_by} • {new Date(note.created_at).toLocaleString()}
+                          {new Date(note.created_at).toLocaleString()}
                         </p>
                       </div>
                       <button
-                        onClick={() => setShowDeleteConfirm(note.id)}
+                        onClick={() => setShowDeleteNoteId(note.id)}
                         className="opacity-0 group-hover:opacity-100 transition-opacity p-2 hover:bg-red-50 rounded"
                       >
                         <Trash2 className="w-4 h-4 text-red-600" />
@@ -471,6 +607,9 @@ function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onCl
                     </div>
                   </div>
                 ))}
+                {notes.length === 0 && (
+                  <p className="text-gray-600 text-sm">No hay notas registradas.</p>
+                )}
               </div>
 
               <div className="pt-4 border-t">
@@ -479,7 +618,7 @@ function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onCl
                     type="text"
                     value={newNote}
                     onChange={(e) => setNewNote(e.target.value)}
-                    onKeyPress={(e) => e.key === "Enter" && handleAddNote()}
+                    onKeyDown={(e) => e.key === "Enter" && handleAddNote()}
                     placeholder="Agregar una nota..."
                     className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-red-500"
                   />
@@ -497,73 +636,382 @@ function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onCl
 
           {activeTab === "alerts" && (
             <div className="space-y-3">
-              {process.alerts.length > 0 ? (
-                process.alerts.map((alert) => (
+              {alerts.length > 0 ? (
+                alerts.map((alert) => (
                   <div
                     key={alert.id}
                     className={`p-4 rounded-lg border-l-4 ${
-                      alert.status === "active" ? "bg-red-50 border-red-500" : "bg-gray-50 border-gray-300"
+                      alert.status === "open"
+                        ? "bg-red-50 border-red-500"
+                        : "bg-gray-50 border-gray-300"
                     }`}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex items-start gap-3">
                         <AlertOctagon
                           className={`w-5 h-5 mt-0.5 flex-shrink-0 ${
-                            alert.status === "active" ? "text-red-600" : "text-gray-600"
+                            alert.status === "open" ? "text-red-600" : "text-gray-600"
                           }`}
                         />
                         <div>
-                          <p className="font-semibold text-gray-900 capitalize">{alert.alert_type}</p>
+                          <p className="font-semibold text-gray-900 capitalize">
+                            {alert.alert_type}
+                          </p>
                           <p className="text-gray-700 text-sm mt-1">{alert.message}</p>
-                          <p className="text-xs text-gray-600 mt-2">{new Date(alert.created_at).toLocaleString()}</p>
+                          <p className="text-xs text-gray-600 mt-2">
+                            {new Date(alert.created_at).toLocaleString()}
+                          </p>
                         </div>
                       </div>
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
-                          alert.status === "active" ? "bg-red-200 text-red-800" : "bg-gray-200 text-gray-800"
+                          alert.status === "open"
+                            ? "bg-red-200 text-red-800"
+                            : "bg-gray-200 text-gray-800"
                         }`}
                       >
-                        {alert.status === "active" ? "Activa" : "Resuelta"}
+                        {alert.status === "open" ? "Activa" : "Resuelta"}
                       </span>
                     </div>
                   </div>
                 ))
               ) : (
-                <p className="text-gray-600">No hay alertas</p>
+                <p className="text-gray-600">No hay alertas registradas.</p>
               )}
             </div>
           )}
 
-          {activeTab === "firma" && (
+          {activeTab === "report" && (
             <div className="space-y-6">
-              {clientSignature ? (
-                <div className="space-y-4">
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
-                    <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-3" />
-                    <p className="font-semibold text-green-900">Firma del Cliente Registrada</p>
-                    <p className="text-sm text-green-700 mt-2">{new Date(process.updated_at).toLocaleDateString()}</p>
+              <div className="grid md:grid-cols-2 gap-4">
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-2">
+                    Información general
+                  </h4>
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-xs font-medium text-gray-700">
+                          Ciudad
+                        </label>
+                        <input
+                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                          value={reportForm.city}
+                          onChange={(e) =>
+                            handleReportFieldChange("city", e.target.value)
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-700">
+                          Fecha servicio
+                        </label>
+                        <input
+                          type="date"
+                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                          value={reportForm.service_date}
+                          onChange={(e) =>
+                            handleReportFieldChange("service_date", e.target.value)
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-700">
+                        Dirección
+                      </label>
+                      <input
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                        value={reportForm.address}
+                        onChange={(e) =>
+                          handleReportFieldChange("address", e.target.value)
+                        }
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-xs font-medium text-gray-700">
+                          Solicitado por
+                        </label>
+                        <input
+                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                          value={reportForm.requested_by}
+                          onChange={(e) =>
+                            handleReportFieldChange("requested_by", e.target.value)
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-700">
+                          Empresa
+                        </label>
+                        <input
+                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                          value={reportForm.company}
+                          onChange={(e) =>
+                            handleReportFieldChange("company", e.target.value)
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-xs font-medium text-gray-700">
+                          NIT / Documento
+                        </label>
+                        <input
+                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                          value={reportForm.nit_document}
+                          onChange={(e) =>
+                            handleReportFieldChange("nit_document", e.target.value)
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-700">
+                          Teléfono
+                        </label>
+                        <input
+                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                          value={reportForm.phone}
+                          onChange={(e) =>
+                            handleReportFieldChange("phone", e.target.value)
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-700">
+                        Correo
+                      </label>
+                      <input
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                        value={reportForm.email}
+                        onChange={(e) =>
+                          handleReportFieldChange("email", e.target.value)
+                        }
+                      />
+                    </div>
                   </div>
-                  <div className="border-2 border-gray-300 rounded-lg p-4 bg-white">
-                    <img src={clientSignature || "/placeholder.svg"} alt="Firma del cliente" className="max-h-48 mx-auto" />
-                  </div>
-                  <button
-                    onClick={() => setClientSignature(null)}
-                    className="w-full px-4 py-2 border border-red-500 text-red-600 rounded-lg font-medium hover:bg-red-50"
-                  >
-                    Reemplazar Firma
-                  </button>
                 </div>
-              ) : (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
-                  <p className="font-semibold text-yellow-900 mb-4">Requiere firma del cliente para finalizar</p>
+
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-2">
+                    Información económica
+                  </h4>
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-xs font-medium text-gray-700">
+                        Valor servicio
+                      </label>
+                      <input
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                        value={reportForm.service_value}
+                        onChange={(e) =>
+                          handleReportFieldChange("service_value", e.target.value)
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-700">
+                        Nota sobre valor
+                      </label>
+                      <input
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                        value={reportForm.service_value_note}
+                        onChange={(e) =>
+                          handleReportFieldChange("service_value_note", e.target.value)
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-700">
+                        Descripción del servicio
+                      </label>
+                      <textarea
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm min-h-[80px]"
+                        value={reportForm.service_description}
+                        onChange={(e) =>
+                          handleReportFieldChange("service_description", e.target.value)
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-2">
+                    Estado del servicio
+                  </h4>
+                  <div className="space-y-2 text-sm">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={reportForm.pending === 1}
+                        onChange={() => handleToggleFlag("pending")}
+                      />
+                      <span>Quedan pendientes por ejecutar</span>
+                    </label>
+                    {reportForm.pending === 1 && (
+                      <textarea
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                        placeholder="Describa los pendientes"
+                        value={reportForm.pending_description}
+                        onChange={(e) =>
+                          handleReportFieldChange("pending_description", e.target.value)
+                        }
+                      />
+                    )}
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={reportForm.previous_service_charged === 1}
+                        onChange={() => handleToggleFlag("previous_service_charged")}
+                      />
+                      <span>Se cobra servicio anterior</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={reportForm.warranty === 1}
+                        onChange={() => handleToggleFlag("warranty")}
+                      />
+                      <span>Servicio en garantía</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={reportForm.solved === 1}
+                        onChange={() => handleToggleFlag("solved")}
+                      />
+                      <span>Solucionado</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-2">
+                    Otros campos
+                  </h4>
+                  <div className="space-y-2 text-sm">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={reportForm.training_given === 1}
+                        onChange={() => handleToggleFlag("training_given")}
+                      />
+                      <span>Capacitación realizada</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={reportForm.ads_installed === 1}
+                        onChange={() => handleToggleFlag("ads_installed")}
+                      />
+                      <span>Publicidad / avisos instalados</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={reportForm.equipment_tests === 1}
+                        onChange={() => handleToggleFlag("equipment_tests")}
+                      />
+                      <span>Pruebas de equipos realizadas</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={reportForm.work_area_clean === 1}
+                        onChange={() => handleToggleFlag("work_area_clean")}
+                      />
+                      <span>Área de trabajo limpia</span>
+                    </label>
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <div>
+                        <label className="text-xs font-medium text-gray-700">
+                          Hora entrada
+                        </label>
+                        <input
+                          type="time"
+                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                          value={reportForm.entry_time}
+                          onChange={(e) =>
+                            handleReportFieldChange("entry_time", e.target.value)
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-700">
+                          Hora salida
+                        </label>
+                        <input
+                          type="time"
+                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                          value={reportForm.exit_time}
+                          onChange={(e) =>
+                            handleReportFieldChange("exit_time", e.target.value)
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-700">
+                        Nombre representante
+                      </label>
+                      <input
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                        value={reportForm.representative_name}
+                        onChange={(e) =>
+                          handleReportFieldChange("representative_name", e.target.value)
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Firma del cliente */}
+              <div className="border-t pt-4 space-y-4">
+                <h4 className="font-semibold text-gray-900">
+                  Firma representante / cliente
+                </h4>
+                {clientSignature ? (
+                  <div className="space-y-3">
+                    <div className="border-2 border-gray-300 rounded-lg p-4 bg-white">
+                      <img
+                        src={clientSignature}
+                        alt="Firma del cliente"
+                        className="max-h-40 mx-auto"
+                      />
+                    </div>
+                    <button
+                      className="px-4 py-2 border border-red-500 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50"
+                      onClick={() => setClientSignature(null)}
+                    >
+                      Reemplazar firma
+                    </button>
+                  </div>
+                ) : (
                   <button
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700"
                     onClick={() => setShowSignaturePad(true)}
-                    className="w-full px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700"
                   >
-                    Agregar Firma
+                    Capturar firma
                   </button>
-                </div>
-              )}
+                )}
+              </div>
+
+              <div className="flex justify-end pt-4 border-t">
+                <button
+                  onClick={handleSaveReport}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 flex items-center gap-2"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  Guardar reporte
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -582,27 +1030,31 @@ function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onCl
               className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 flex items-center gap-2"
             >
               <Edit2 className="w-4 h-4" />
-              Editar Proceso
+              Editar proceso
             </button>
           )}
         </div>
       </div>
 
-      {/* Delete Confirmation Dialog */}
-      {showDeleteConfirm && (
+      {/* Modal eliminar nota */}
+      {showDeleteNoteId && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
           <div className="bg-white rounded-lg p-6 max-w-sm w-full">
-            <h3 className="font-bold text-lg text-gray-900 mb-2">Eliminar nota</h3>
-            <p className="text-gray-600 mb-6">¿Estás seguro que deseas eliminar esta nota?</p>
+            <h3 className="font-bold text-lg text-gray-900 mb-2">
+              Eliminar nota
+            </h3>
+            <p className="text-gray-600 mb-6">
+              ¿Estás seguro que deseas eliminar esta nota?
+            </p>
             <div className="flex gap-3 justify-end">
               <button
-                onClick={() => setShowDeleteConfirm(null)}
+                onClick={() => setShowDeleteNoteId(null)}
                 className="px-4 py-2 border border-gray-300 rounded-lg font-medium text-gray-900 hover:bg-gray-50"
               >
                 Cancelar
               </button>
               <button
-                onClick={() => handleDeleteNote(showDeleteConfirm)}
+                onClick={() => handleDeleteNote(showDeleteNoteId)}
                 className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700"
               >
                 Eliminar
@@ -614,11 +1066,15 @@ function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onCl
 
       {/* Signature Pad */}
       {showSignaturePad && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
           <div className="bg-white rounded-lg p-6 max-w-lg w-full">
-            <h3 className="font-bold text-lg text-gray-900 mb-4">Firma del Cliente</h3>
-            <p className="text-sm text-gray-600 mb-4">Firmar en el recuadro debajo</p>
-            
+            <h3 className="font-bold text-lg text-gray-900 mb-4">
+              Firma del cliente / representante
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Pida al cliente que firme en el recuadro.
+            </p>
+
             <div className="border-2 border-gray-300 rounded-lg overflow-hidden bg-white">
               <SignatureCanvas
                 ref={signatureCanvasRef}
@@ -630,7 +1086,7 @@ function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onCl
                 }}
               />
             </div>
-            
+
             <div className="flex gap-3 justify-end mt-4">
               <button
                 onClick={clearSignature}
@@ -649,7 +1105,7 @@ function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onCl
                 onClick={handleSignature}
                 className="px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700"
               >
-                Confirmar Firma
+                Confirmar firma
               </button>
             </div>
           </div>
@@ -659,8 +1115,12 @@ function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onCl
       {/* Toast */}
       {toast && (
         <div
-          className={`fixed bottom-6 right-6 px-4 py-3 rounded-lg text-sm font-medium z-[70] animate-fade-in ${
-            toast.type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"
+          className={`fixed bottom-6 right-6 px-4 py-3 rounded-lg text-sm font-medium z-[80] ${
+            toast.type === "success"
+              ? "bg-green-600 text-white"
+              : toast.type === "error"
+              ? "bg-red-600 text-white"
+              : "bg-blue-600 text-white"
           }`}
         >
           {toast.message}
@@ -670,7 +1130,13 @@ function ProcessDetailModal({ process, onClose }: { process: ProcessDetail; onCl
   )
 }
 
-function ProcessCard({ process, onClick }: { process: Process; onClick: () => void }) {
+function ProcessCard({
+  process,
+  onClick,
+}: {
+  process: ProcessWithStage
+  onClick: () => void
+}) {
   return (
     <button
       onClick={onClick}
@@ -695,61 +1161,174 @@ function ProcessCard({ process, onClick }: { process: Process; onClick: () => vo
   )
 }
 
+// ================== SECCIÓN PRINCIPAL ==================
+
 export function ProcessesSection() {
+  const [processes, setProcesses] = useState<ProcessWithStage[]>([])
   const [selectedProcess, setSelectedProcess] = useState<ProcessDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadingDetail, setLoadingDetail] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const [toast, setToast] = useState<ToastState>(null)
+  const showToast = (
+  message: string,
+  type: "success" | "error" | "info" = "success") => {
+
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 2500)
+  }
+
+  const loadProcesses = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const apiProcesses = await processesService.getAll()
+      const mapped: ProcessWithStage[] = apiProcesses.map((p) => ({
+        ...p,
+        current_stage: mapStatusToStage(p.status),
+        client_signature: null,
+      }))
+      setProcesses(mapped)
+    } catch (err) {
+      console.error(err)
+      setError("No se pudieron cargar los procesos.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadProcesses()
+  }, [])
+
+  const openProcess = async (p: ProcessWithStage) => {
+    try {
+      setLoadingDetail(true)
+      const [materials, notes, alerts, reports] = await Promise.all([
+        processMaterialsService.getAll(p.id),
+        processNotesService.getAll(p.id),
+        processAlertsService.getAll(p.id),
+        serviceReportsService.getByProcess(p.id),
+      ])
+
+      const detail: ProcessDetail = {
+        ...p,
+        materials,
+        notes,
+        alerts,
+        serviceReport: reports[0] ?? null,
+      }
+      setSelectedProcess(detail)
+    } catch (err) {
+      console.error(err)
+      showToast("No se pudo cargar el detalle del proceso", "error")
+    } finally {
+      setLoadingDetail(false)
+    }
+  }
+
+  const handleProcessUpdated = (updated: ProcessDetail) => {
+    setProcesses((prev) =>
+      prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)),
+    )
+    setSelectedProcess(updated)
+  }
 
   return (
     <div className="p-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Procesos</h1>
-        <p className="text-gray-600">Gestiona y supervisa todos los procesos de instalación</p>
+        <p className="text-gray-600">
+          Gestiona y supervisa todos los procesos de instalación
+        </p>
+        {error && (
+          <p className="mt-2 text-sm text-red-600">
+            {error}{" "}
+            <button onClick={loadProcesses} className="underline">
+              Reintentar
+            </button>
+          </p>
+        )}
       </div>
 
-      {/* Toolbar */}
+      {/* Toolbar básica con totales por estado */}
       <div className="flex justify-between items-center mb-6">
-        <div className="flex gap-2">
-          {["pending", "in_progress", "completed", "cancelled"].map((status) => {
-            const count = mockProcesses.filter((p) => p.status === status).length
-            const labels: Record<string, string> = {
+        <div className="flex gap-2 flex-wrap">
+          {(["pending", "in_progress", "done", "cancelled"] as const).map((status) => {
+            const count = processes.filter((p) => p.status === status).length
+            const labels: Record<typeof status, string> = {
               pending: "Pendientes",
-              in_progress: "En Progreso",
-              completed: "Completados",
+              in_progress: "En progreso",
+              done: "Finalizados",
               cancelled: "Cancelados",
             }
             return (
-              <button
+              <span
                 key={status}
-                className="px-4 py-2 rounded font-medium text-sm bg-gray-100 text-gray-900 hover:bg-gray-200"
+                className="px-4 py-2 rounded font-medium text-sm bg-gray-100 text-gray-900"
               >
                 {labels[status]} ({count})
-              </button>
+              </span>
             )
           })}
         </div>
         <button className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700">
           <Plus className="w-4 h-4" />
-          Nuevo Proceso
+          Nuevo proceso
         </button>
       </div>
 
-      {/* Processes List */}
-      <div className="grid gap-3">
-        {mockProcesses.map((process) => (
-          <ProcessCard
-            key={process.id}
-            process={process}
-            onClick={() => {
-              const details = mockProcessDetails[process.id]
-              if (details) {
-                setSelectedProcess(details)
-              }
-            }}
-          />
-        ))}
-      </div>
+      {loading ? (
+        <p className="text-gray-500">Cargando procesos...</p>
+      ) : processes.length === 0 ? (
+        <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-10 text-center">
+          <AlertCircle className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+          <p className="text-gray-600">
+            No hay procesos creados. Crea un nuevo proceso para comenzar.
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {processes.map((process) => (
+            <ProcessCard
+              key={process.id}
+              process={process}
+              onClick={() => openProcess(process)}
+            />
+          ))}
+        </div>
+      )}
 
-      {/* Detail Modal */}
-      {selectedProcess && <ProcessDetailModal process={selectedProcess} onClose={() => setSelectedProcess(null)} />}
+      {loadingDetail && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-40">
+          <div className="bg-white px-4 py-3 rounded-lg shadow text-gray-700 text-sm">
+            Cargando detalle del proceso...
+          </div>
+        </div>
+      )}
+
+      {selectedProcess && (
+        <ProcessDetailModal
+          process={selectedProcess}
+          onClose={() => setSelectedProcess(null)}
+          onUpdated={handleProcessUpdated}
+        />
+      )}
+
+      {toast && (
+        <div
+          className={`fixed bottom-6 right-6 px-4 py-3 rounded-lg text-sm font-medium z-[90] ${
+            toast.type === "success"
+              ? "bg-green-600 text-white"
+              : toast.type === "error"
+              ? "bg-red-600 text-white"
+              : "bg-blue-600 text-white"
+          }`}
+        >
+          {toast.message}
+        </div>
+      )}
     </div>
   )
 }
