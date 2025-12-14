@@ -5,7 +5,6 @@ import {
   ChevronRight,
   AlertCircle,
   Plus,
-  CheckCircle,
   X,
   Send,
   AlertOctagon,
@@ -268,7 +267,7 @@ function ProcessDetailModal({
   const [editData, setEditData] = useState({
     name: process.name,
     status: String(process.current_stage ?? mapStatusToStage(process.status)),
-    assigned_to: process.assigned_to,
+    assigned_to: process.assigned_to ?? 0,
   })
 
   // Notas
@@ -350,48 +349,67 @@ function ProcessDetailModal({
   // ======== acciones proceso ========
 
   const handleSaveEdit = async () => {
-    try {
-      const oldStatus = process.status
-      const newStage = Number(editData.status)
+  try {
+    const oldStatus = process.status
+    const newStage = Number(editData.status)
 
-      if (!newStage || newStage < 1 || newStage > PROCESS_STAGES.length) {
-        showToast("Etapa inválida", "error")
-        return
-      }
-
-      await processesService.update(process.id, {
-        name: editData.name,
-        status: String(newStage),
-        assigned_to: editData.assigned_to,
-      })
-
-      await processHistoryService.create({
-        process_id: process.id,
-        old_status: oldStatus,
-        new_status: String(newStage),
-        changed_by: process.assigned_to,
-        note: "Actualización de etapa desde panel de procesos",
-      })
-
-      const updated: ProcessDetail = {
-        ...process,
-        name: editData.name,
-        status: String(newStage),
-        assigned_to: editData.assigned_to,
-        current_stage: newStage,
-        materials,
-        notes,
-        alerts,
-        serviceReport,
-      }
-      onUpdated(updated)
-      setIsEditing(false)
-      showToast("Proceso actualizado correctamente", "success")
-    } catch (err) {
-      console.error(err)
-      showToast("No se pudo actualizar el proceso", "error")
+    if (!newStage || newStage < 1 || newStage > PROCESS_STAGES.length) {
+      showToast("Etapa inválida", "error")
+      return
     }
+
+    // Mapeamos la etapa (1..7) al status string que entiende el backend
+    // puedes ajustar esta lógica si quieres otros estados
+    const statusByStage: Record<number, string> = {
+      1: "pending",
+      7: "done",
+    }
+    const newStatus = statusByStage[newStage] ?? "in_progress"
+
+    // ⚠️ ESTE ES EL JSON QUE TIENE QUE SER IGUAL AL DE SWAGGER
+    const payload = {
+      name: editData.name.trim(),
+      created_by: process.created_by ?? 0,
+      assigned_to:
+        editData.assigned_to !== undefined && editData.assigned_to !== null
+          ? editData.assigned_to
+          : process.assigned_to ?? 0,
+      status: newStatus,
+      quote_id: process.quote_id ?? 0,
+    }
+
+    console.log("PUT /processes payload FRONT:", payload)
+
+    const apiProcess = await processesService.update(process.id, payload)
+
+    await processHistoryService.create({
+      process_id: process.id,
+      old_status: oldStatus,
+      new_status: newStatus,
+      changed_by: process.assigned_to,
+      note: "Actualización de etapa desde panel de procesos",
+    })
+
+    const updated: ProcessDetail = {
+      ...process,
+      ...apiProcess,
+      current_stage: newStage,
+      materials,
+      notes,
+      alerts,
+      serviceReport,
+    }
+
+    onUpdated(updated)
+    setIsEditing(false)
+    showToast("Proceso actualizado correctamente", "success")
+  } catch (err: any) {
+    console.error("Error al actualizar proceso:", err)
+    console.error("Respuesta backend:", err?.response?.data)
+    showToast("No se pudo actualizar el proceso", "error")
   }
+}
+
 
   // ======== notas ========
 
@@ -544,14 +562,13 @@ function ProcessDetailModal({
                     <input
                       type="number"
                       value={editData.assigned_to}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const v = e.target.value
                         setEditData((prev) => ({
                           ...prev,
-                          assigned_to: Number.parseInt(
-                            e.target.value || "0",
-                          ),
+                          assigned_to: v === "" ? 0 : Number(v),
                         }))
-                      }
+                      }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:border-red-500"
                     />
                   </div>
@@ -781,16 +798,10 @@ function ProcessDetailModal({
 
           {activeTab === "report" && (
             <div className="space-y-6">
-              {/* Aquí puedes pegar tu contenido completo del formulario de reporte */}
+              {/* Aquí va tu formulario real de reporte de servicio técnico */}
               <p className="text-sm text-gray-600">
                 Aquí va el contenido del reporte de servicio técnico.
               </p>
-              {/* Ejemplo de uso de handlers para que no se pierdan */}
-              {/* 
-                - handleReportFieldChange("city", "Bogotá")
-                - handleToggleFlag("pending")
-                - handleSaveReport()
-              */}
             </div>
           )}
         </div>
