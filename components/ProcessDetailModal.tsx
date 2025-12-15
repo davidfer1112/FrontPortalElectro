@@ -35,6 +35,7 @@ import { serviceReportsService } from "@/services/serviceReportsService"
 import { processHistoryService } from "@/services/processHistoryService"
 import { catalogService } from "@/services/catalogService"
 import { cablesAndAccessoriesService } from "@/services/cablesAndAccessoriesService"
+import { processAlertsService } from "@/services/processAlertsService"
 
 
 import Image from "next/image"
@@ -273,6 +274,11 @@ export function ProcessDetailModal({
   const [newNote, setNewNote] = useState("")
   const [showDeleteNoteId, setShowDeleteNoteId] = useState<number | null>(null)
 
+// Alertas (crear)
+const [newAlertType, setNewAlertType] = useState("general")
+const [newAlertMessage, setNewAlertMessage] = useState("")
+const [creatingAlert, setCreatingAlert] = useState(false)
+
   // CRUD Materiales
   const [isAddingMaterial, setIsAddingMaterial] = useState(false)
   const [newMaterial, setNewMaterial] = useState<{
@@ -395,18 +401,20 @@ const [selectedMaterial, setSelectedMaterial] = useState<SelectedMaterial | null
   try {
     setLoadingInit(true)
 
-    const [mats, nts, reports] = await Promise.all([
-      processMaterialsService.getAll(process.id),
-      processNotesService.getAll?.(process.id) ?? Promise.resolve(process.notes ?? []),
-      serviceReportsService.getByProcess(process.id), 
-    ])
+    const [mats, nts, alts, reports] = await Promise.all([
+  processMaterialsService.getAll(process.id),
+  processNotesService.getAll?.(process.id) ?? Promise.resolve(process.notes ?? []),
+  processAlertsService.getAll(process.id),
+  serviceReportsService.getByProcess(process.id),
+])
 
-    const rep = reports?.[0] ?? null 
+const rep = reports?.[0] ?? null
 
-    setMaterials(mats ?? [])
-    setNotes((nts as any) ?? [])
-    setServiceReport(rep)
-    setReportForm(buildDefaultReportForm(rep))
+setMaterials(mats ?? [])
+setNotes((nts as any) ?? [])
+setAlerts((alts as any) ?? [])
+setServiceReport(rep)
+setReportForm(buildDefaultReportForm(rep))
   } catch (err: any) {
     console.error("Error cargando detalle del proceso:", err)
     console.error("Respuesta backend:", err?.response?.data)
@@ -483,6 +491,70 @@ const [selectedMaterial, setSelectedMaterial] = useState<SelectedMaterial | null
       showToast("No se pudo actualizar el proceso", "error")
     }
   }
+
+
+
+  const handleCreateAlert = async () => {
+  try {
+    if (!newAlertMessage.trim()) {
+      showToast("Escribe el mensaje de la alerta", "error")
+      return
+    }
+
+    setCreatingAlert(true)
+
+    const created = await processAlertsService.create({
+      process_id: process.id,
+      reported_by: Number(process.assigned_to ?? process.created_by ?? 0), // AJUSTA si tienes userId real
+      alert_type: newAlertType,
+      message: newAlertMessage.trim(),
+      status: "open",
+    })
+
+    setAlerts((prev) => [created, ...prev])
+    setNewAlertMessage("")
+    setNewAlertType("general")
+    showToast("Alerta creada", "success")
+  } catch (err: any) {
+    console.error("Error creando alerta:", err)
+    console.error("Respuesta backend:", err?.response?.data)
+    showToast("No se pudo crear la alerta", "error")
+  } finally {
+    setCreatingAlert(false)
+  }
+}
+
+const handleResolveAlert = async (alert: ProcessAlert) => {
+  try {
+    const updated = await processAlertsService.update(alert.id, {
+      status: "closed",
+      resolved_at: new Date().toISOString(),
+    })
+
+    setAlerts((prev) => prev.map((a) => (a.id === alert.id ? updated : a)))
+    showToast("Alerta marcada como resuelta", "success")
+  } catch (err: any) {
+    console.error("Error resolviendo alerta:", err)
+    console.error("Respuesta backend:", err?.response?.data)
+    showToast("No se pudo resolver la alerta", "error")
+  }
+}
+
+const handleDeleteAlert = async (alertId: number) => {
+  const ok = window.confirm("¿Eliminar esta alerta?")
+  if (!ok) return
+
+  try {
+    await processAlertsService.remove(alertId)
+    setAlerts((prev) => prev.filter((a) => a.id !== alertId))
+    showToast("Alerta eliminada", "success")
+  } catch (err: any) {
+    console.error("Error eliminando alerta:", err)
+    console.error("Respuesta backend:", err?.response?.data)
+    showToast("No se pudo eliminar la alerta", "error")
+  }
+}
+
 
   // ======== CRUD MATERIALES (CATÁLOGO) ========
 
@@ -1231,51 +1303,130 @@ const filteredCables = useMemo(() => {
             )}
 
             {activeTab === "alerts" && (
-              <div className="space-y-3">
-                {alerts.length > 0 ? (
-                  alerts.map((alert) => (
-                    <div
-                      key={alert.id}
-                      className={`p-4 rounded-lg border-l-4 ${
-                        alert.status === "open"
-                          ? "bg-red-50 border-red-500"
-                          : "bg-gray-50 border-gray-300"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-start gap-3">
-                          <AlertOctagon
-                            className={`w-5 h-5 mt-0.5 flex-shrink-0 ${
-                              alert.status === "open" ? "text-red-600" : "text-gray-600"
-                            }`}
-                          />
-                          <div>
-                            <p className="font-semibold text-gray-900 capitalize">
-                              {alert.alert_type}
-                            </p>
-                            <p className="text-gray-700 text-sm mt-1">{alert.message}</p>
-                            <p className="text-xs text-gray-600 mt-2">
-                              {new Date(alert.created_at).toLocaleString()}
-                            </p>
-                          </div>
-                        </div>
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
-                            alert.status === "open"
-                              ? "bg-red-200 text-red-800"
-                              : "bg-gray-200 text-gray-800"
-                          }`}
-                        >
-                          {alert.status === "open" ? "Activa" : "Resuelta"}
-                        </span>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-gray-600">No hay alertas registradas.</p>
-                )}
+  <div className="space-y-5">
+    {/* Crear alerta */}
+    <div className="border rounded-lg p-4 bg-gray-50">
+      <h3 className="font-semibold text-gray-900 mb-3">Crear alerta</h3>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="md:col-span-1">
+          <label className="text-xs font-medium text-gray-600 block mb-1">
+            Tipo
+          </label>
+          <select
+            value={newAlertType}
+            onChange={(e) => setNewAlertType(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-red-500 bg-white"
+          >
+            <option value="general">General</option>
+            <option value="materiales">Materiales</option>
+            <option value="instalacion">Instalación</option>
+            <option value="transporte">Transporte</option>
+            <option value="seguridad">Seguridad</option>
+            <option value="cliente">Cliente</option>
+          </select>
+        </div>
+
+        <div className="md:col-span-2">
+          <label className="text-xs font-medium text-gray-600 block mb-1">
+            Mensaje
+          </label>
+          <div className="flex gap-2">
+            <input
+              value={newAlertMessage}
+              onChange={(e) => setNewAlertMessage(e.target.value)}
+              placeholder="Describe la alerta..."
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-red-500 bg-white"
+              onKeyDown={(e) => e.key === "Enter" && handleCreateAlert()}
+            />
+            <button
+              onClick={handleCreateAlert}
+              disabled={creatingAlert}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-60"
+            >
+              {creatingAlert ? "Creando..." : "Crear"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {/* Listado */}
+    <div className="space-y-3">
+      {alerts.length > 0 ? (
+        alerts.map((alert) => (
+          <div
+            key={alert.id}
+            className={`p-4 rounded-lg border-l-4 ${
+              alert.status === "open"
+                ? "bg-red-50 border-red-500"
+                : "bg-gray-50 border-gray-300"
+            }`}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <AlertOctagon
+                  className={`w-5 h-5 mt-0.5 flex-shrink-0 ${
+                    alert.status === "open" ? "text-red-600" : "text-gray-600"
+                  }`}
+                />
+                <div>
+                  <p className="font-semibold text-gray-900 capitalize">
+                    {alert.alert_type}
+                  </p>
+                  <p className="text-gray-700 text-sm mt-1">{alert.message}</p>
+                  <p className="text-xs text-gray-600 mt-2">
+                    {new Date(alert.created_at).toLocaleString()}
+                    {alert.resolved_at ? (
+                      <>
+                        {" "}
+                        • Resuelta:{" "}
+                        {new Date(alert.resolved_at).toLocaleString()}
+                      </>
+                    ) : null}
+                  </p>
+                </div>
               </div>
-            )}
+
+              <div className="flex items-center gap-2">
+                <span
+                  className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
+                    alert.status === "open"
+                      ? "bg-red-200 text-red-800"
+                      : "bg-gray-200 text-gray-800"
+                  }`}
+                >
+                  {alert.status === "open" ? "Activa" : "Resuelta"}
+                </span>
+
+                {alert.status === "open" && (
+                  <button
+                    onClick={() => handleResolveAlert(alert)}
+                    className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                    title="Marcar como resuelta"
+                  >
+                    Resolver
+                  </button>
+                )}
+
+                <button
+                  onClick={() => handleDeleteAlert(alert.id)}
+                  className="p-2 rounded hover:bg-red-50"
+                  title="Eliminar alerta"
+                >
+                  <Trash2 className="w-4 h-4 text-red-600" />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))
+      ) : (
+        <p className="text-gray-600">No hay alertas registradas.</p>
+      )}
+    </div>
+  </div>
+)}
+
 
             {activeTab === "report" && (
               <div className="space-y-6">
